@@ -115,3 +115,17 @@ minibot telegram
 ## 專案結構
 
 詳見 [MINIBOT_MINIMAL_VERSION.md](MINIBOT_MINIMAL_VERSION.md)
+
+## 程式碼量統計 (極簡約定)
+
+本專案旨在維持極簡的 Agent 核心框架。你隨時可以用以下 PowerShell 指令追蹤目前的 `minibot` 套件 `.py` 檔案總行數：
+
+```powershell
+# 統計總行數
+(Get-ChildItem -Recurse -File -Filter *.py minibot | Get-Content | Measure-Object -Line).Lines
+
+# 列出各檔案行數排行榜
+Get-ChildItem -Recurse -File -Filter *.py minibot | Select-Object FullName | ForEach-Object { $lines = (Get-Content $_.FullName | Measure-Object -Line).Lines; [PSCustomObject]@{ File=$_.FullName.Replace((Get-Location).Path + "\", ""); Lines=$lines } } | Sort-Object Lines -Descending | Format-Table -AutoSize
+```
+
+> **截至 2026-02-21：核心程式碼約為 938 行**

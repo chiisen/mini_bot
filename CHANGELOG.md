@@ -6,7 +6,8 @@
 
 ### 新增
 
-- **Telegram 頻道**：`minibot telegram` 指令啟動 Telegram Bot（Polling 模式）
+- **全域規範與相容性**：建立 `GEMINI.md` 與 `.opencode/rules/AGENTS.md`。(Why: 確保遵循全域 AI Agent 指南，並保持與 Opencode 環境的相容性，同時設定千行代碼的收尾檢查機制)
+- **Telegram 頻道**：`minibot telegram` 指令啟動 Telegram Bot（Polling 模式）。(Why: 將對話介面延展至通訊軟體，讓助理隨時可用)
 - 每個 Telegram 使用者獨立 Session（key = `tg:user_{user_id}`）
 - 支援 `/start` 歡迎訊息、長訊息自動分段回傳
 - Config schema 新增 `channels.telegram.botToken` 欄位
