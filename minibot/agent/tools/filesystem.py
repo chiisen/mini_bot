@@ -24,10 +24,16 @@ class ShellTool(Tool):
                 command,
                 shell=True,
                 capture_output=True,
-                text=True,
                 timeout=60,
             )
-            output = result.stdout or result.stderr or "(no output)"
+            try:
+                stdout = result.stdout.decode("utf-8", errors="replace") if result.stdout else ""
+                stderr = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
+                output = stdout or stderr or "(no output)"
+            except:
+                stdout = result.stdout.decode("latin-1", errors="replace") if result.stdout else ""
+                stderr = result.stderr.decode("latin-1", errors="replace") if result.stderr else ""
+                output = stdout or stderr or "(no output)"
             if result.returncode != 0:
                 return f"[Exit code: {result.returncode}]\n{output}"
             return output
