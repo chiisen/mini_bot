@@ -144,20 +144,62 @@ minibot agent -m "你好，請幫我列出目前目錄下的檔案"
 
 # 查看系統狀態與設定
 minibot status
+
+# 顯示所有設定值（除錯用）
+minibot config-show
+```
+
+### 🌍 多語系
+
+支援英文、繁體中文、簡體中文。設定優先順序：config.json > 環境變數 > 預設
+
+**方式一：透過 config.json**
+```json
+{
+  "locale": "zh_TW"
+}
+```
+
+**方式二：透過環境變數**
+```bash
+# 英文（預設）
+export MINIBOT_LOCALE=en
+
+# 繁體中文
+export MINIBOT_LOCALE=zh_TW
+
+# 簡體中文
+export MINIBOT_LOCALE=zh_CN
+```
+
+### 🧪 測試
+
+```bash
+# 執行單元測試
+python -m pytest tests/ -v
+
+# 測試 i18n 切換
+python -c "from minibot.i18n import t, set_locale, init; init(); print('EN:', t('cli.agent.welcome', version='1.0')); set_locale('zh_TW'); print('TW:', t('cli.agent.welcome', version='1.0'))"
 ```
 
 
 ## 📝 設定說明（`~/.minibot/config.json`）
 
-只需修改 `apiKey` 一個欄位，其餘保留預設即可：
+完整參數說明：
 
 ```json
 {
+  "locale": "zh_TW",
   "providers": {
     "minimax": {
-      "apiKey": "← 替換成你的 MiniMax API Key",
-      "apiBase": "https://api.minimax.io/v1"  ← 保留不變
-    }
+      "apiKey": "← 替換成你的 API Key",
+      "apiBase": "https://api.minimax.io/v1"
+    },
+    "openrouter": { "apiKey": "", "apiBase": "" },
+    "anthropic": { "apiKey": "", "apiBase": "" },
+    "openai": { "apiKey": "", "apiBase": "" },
+    "deepseek": { "apiKey": "", "apiBase": "" },
+    "gemini": { "apiKey": "", "apiBase": "" }
   },
   "channels": {
     "telegram": {
@@ -166,14 +208,32 @@ minibot status
   },
   "agents": {
     "defaults": {
-      "model": "minimax/MiniMax-M2.5"         ← 保留不變
+      "model": "minimax/MiniMax-M2.5",
+      "workspace": "~/.minibot/workspace",
+      "max_tokens": 8192,
+      "temperature": 0.7,
+      "max_tool_iterations": 20,
+      "memory_window": 50
     }
   }
 }
 ```
 
-> - 🔑 MiniMax API Key 可至 [minimax.io](https://www.minimax.io/) 申請取得。
-> - 💬 Telegram Bot Token 可透過 [@BotFather](https://t.me/BotFather) 申請。
+### 參數說明
+
+| 參數 | 類型 | 預設 | 說明 |
+|------|------|------|------|
+| `locale` | string | `en` | 語系：`en`、`zh_TW`、`zh_CN` |
+| `model` | string | `minimax/MiniMax-M2.5` | LLM 模型名稱 |
+| `workspace` | stringminibot/ | `~/.workspace` | 工作目錄路徑 |
+| `max_tokens` | int | 8192 | 單次回應最大 token 數 |
+| `temperature` | float | 0.7 | LLM 隨機性（0-2） |
+| `max_tool_iterations` | int | 20 | Agent 最多 Tool 呼叫次數 |
+| `memory_window` | int | 50 | 對話歷史保留訊息數 |
+
+> - 🌐 `locale` 設定優先順序：config.json > 環境變數 > 預設
+> - 🔑 API Key 可至 [minimax.io](https://www.minimax.io/) 或其他 Provider 申請
+> - 💬 Telegram Bot Token 可透過 [@BotFather](https://t.me/BotFather) 申請
 
 ## 📱 Telegram Bot
 

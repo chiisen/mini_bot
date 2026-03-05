@@ -25,7 +25,9 @@ from minibot.utils.helpers import ensure_dir, get_data_path
 
 app = typer.Typer(help="minibot - Personal AI Assistant (powered by mini_bot)")
 console = Console()
-i18n_init()
+
+config = load_config()
+i18n_init(config_locale=config.locale)
 
 
 @app.command()
@@ -165,6 +167,47 @@ def status():
         console.print(t("cli.status.telegram_enabled", masked=masked))
     else:
         console.print(t("cli.status.telegram_disabled"))
+
+
+@app.command()
+def config_show():
+    """顯示目前所有設定值（除錯用）。"""
+    from minibot.i18n import get_locale
+    import json
+
+    config = load_config()
+    config_path = get_config_path()
+
+    console.print(f"\n[bold]🔧 Config File: {config_path}[/bold]")
+    console.print(f"[dim]Locale: {get_locale()}[/dim]\n")
+
+    data = config.model_dump(by_alias=True)
+
+    console.print("[bold]Agents Defaults:[/bold]")
+    console.print(f"  model: {data.get('agents', {}).get('defaults', {}).get('model')}")
+    console.print(f"  workspace: {data.get('agents', {}).get('defaults', {}).get('workspace')}")
+    console.print(f"  max_tool_iterations: {data.get('agents', {}).get('defaults', {}).get('max_tool_iterations')}")
+    console.print(f"  temperature: {data.get('agents', {}).get('defaults', {}).get('temperature')}")
+    console.print(f"  max_tokens: {data.get('agents', {}).get('defaults', {}).get('max_tokens')}")
+    console.print(f"  memory_window: {data.get('agents', {}).get('defaults', {}).get('memory_window')}")
+
+    console.print("\n[bold]Providers:[/bold]")
+    for name in ("minimax", "openrouter", "anthropic", "openai", "deepseek", "gemini"):
+        prov = data.get("providers", {}).get(name, {})
+        api_key = prov.get("apiKey", "")
+        api_base = prov.get("apiBase", "")
+        if api_key:
+            console.print(f"  {name}:")
+            console.print(f"    apiKey: {api_key[:8]}...{api_key[-4:]}")
+            console.print(f"    apiBase: {api_base or '(default)'}")
+
+    console.print("\n[bold]Channels:[/bold]")
+    tg = data.get("channels", {}).get("telegram", {})
+    bot_token = tg.get("botToken", "")
+    if bot_token:
+        console.print(f"  telegram:")
+        console.print(f"    botToken: {bot_token[:8]}...{bot_token[-4:]}")
+        console.print(f"    botUsername: {tg.get('botUsername', '(not set)')}")
 
 
 @app.command()

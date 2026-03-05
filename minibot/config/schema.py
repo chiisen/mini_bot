@@ -70,6 +70,7 @@ class ChannelsConfig(Base):
 
 class Config(Base):
     """主配置類別。"""
+    locale: str = "en"
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)

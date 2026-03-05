@@ -37,7 +37,9 @@ def get_locale() -> str:
     return _current_locale
 
 
-def detect_locale() -> str:
+def detect_locale(config_locale: str | None = None) -> str:
+    if config_locale and config_locale in SUPPORTED_LOCALES:
+        return config_locale
     env_locale = os.environ.get("MINIBOT_LOCALE")
     if env_locale and env_locale in SUPPORTED_LOCALES:
         return env_locale
@@ -57,6 +59,6 @@ def t(key: str, **kwargs) -> str:
     return text
 
 
-def init():
+def init(config_locale: str | None = None):
     _load_translations()
-    set_locale(detect_locale())
+    set_locale(detect_locale(config_locale))
