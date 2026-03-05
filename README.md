@@ -11,6 +11,56 @@
 - 🔧 **基本工具**：讀/寫/列目錄
 - ⚡ **非同步 Agent Loop**
 
+## 🏗️ 系統架構
+
+> 📦 **預覽須知**：本圖使用 Mermaid 語法繪製。若在 VS Code 中看不到圖示，
+> 請安裝擴充套件 [Markdown Preview Mermaid Support](https://marketplace.visualstudio.com/items?itemName=bierner.markdown-mermaid)
+> （搜尋 `bierner.markdown-mermaid`）後，重新開啟 Markdown Preview 即可正常顯示。
+
+```mermaid
+flowchart TD
+    subgraph 輸入通道
+        CLI[CLI: minibot agent] --> |文字輸入| Bus
+        TG[Telegram Bot] --> |Polling| Bus
+    end
+
+    subgraph 核心引擎
+        Bus --> |訊息| AgentLoop[Agent Loop]
+        
+        AgentLoop --> Context[Context Builder]
+        Context --> |system prompt + 歷史訊息| LLM[LLM Provider]
+        
+        LLM -->|回應| AgentLoop
+        
+        AgentLoop --> |tool call| ToolReg[Tool Registry]
+        ToolReg --> |執行結果| AgentLoop
+    end
+
+    subgraph 資料層
+        Context -.-> |載入| SessionMgr[Session Manager]
+        SessionMgr -.-> |讀寫| SessionFile[Session JSONL]
+        AgentLoop -.-> |長期記憶| Memory[Memory System]
+        Memory -.-> |MEMORY.md| MemoryFile[Memory File]
+    end
+
+    LLM -->|最終回覆| Output[輸出]
+    Output --> CLI
+    Output --> TG
+```
+
+### 模組說明
+
+| 模組 | 檔案 | 說明 |
+|------|------|------|
+| CLI | `cli/commands.py` | 命令列互動介面 |
+| Telegram | `channels/telegram.py` | Telegram Bot Polling |
+| Agent Loop | `agent/loop.py` | 核心 Agent 迴圈 |
+| Context | `agent/context.py` | 對話上下文建構 |
+| LLM Provider | `providers/litellm_provider.py` | LiteLLM 整合 |
+| Tool Registry | `agent/tools/registry.py` | 工具註冊與執行 |
+| Session Manager | `session/manager.py` | 對話歷史持久化 |
+| Memory | `agent/memory.py` | 長期記憶系統 |
+
 ## 🚀 快速開始
 
 ### 1. 🛠️ 環境準備 (以 macOS 為例)
