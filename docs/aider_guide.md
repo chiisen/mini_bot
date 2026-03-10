@@ -43,6 +43,30 @@ $env:ANTHROPIC_API_KEY="sk-ant-你的_Anthropic_API_Key"
 
 ---
 
+### 🦙 使用 Ollama (完全免費，無須 API Key)
+
+如果你想使用本地部署的模型來替代付費 API（例如 `llama3`、`qwen2.5-coder` 等），你可以透過 Ollama 來運行 Aider：
+
+1. **確保服務啟動**：確認 Ollama 正在背景運行，且我們已下載對應的模型（例如：`ollama pull llama3`）。
+2. **啟動 Aider 時加上指定模型參數**：
+   只要透過 `--model ollama/<模型名稱>` 的格式啟動，完全不需要設定環境變數或 API Key！
+
+```powershell
+# 語法：aider --model ollama/<模型名稱>
+aider --model ollama/llama3
+
+aider --model ollama/got-oss:20b0cloud
+```
+
+> **💡 提示：上下文長度 (Context Window)**  
+> 預設 Ollama 的 Context 可能較小（2k），對於 Aider 在編輯多個檔案時可能會不夠用。啟動前建議暫時拉高 Ollama 允許的上下文大小：
+>
+> ```powershell
+> $env:OLLAMA_NUM_CTX=8192
+> ```
+
+---
+
 ## 3. 🚀 開始結對程式設計 (Pair Programming)
 
 進入你的專案目錄 (例如 `mini_bot`)，直接啟動 Aider：
@@ -67,21 +91,35 @@ aider
 在 Aider 介面中，直接打字就是對 AI 說話。但如果加上預設的斜線指令 (`/`)，可以執行各種強大的開發與系統控制。
 
 ### 檔案管理
+
 - `/add <檔案>`：將檔案拉進這輪對話的 Context，讓 AI 參考或修改（例如 `/add README.md`）。
 - `/drop <檔案>`：把檔案從這輪 Context 中移除，節省 Token。
 - `/ls`：查看目前被加進 Context 的所有檔案列表。
 
+### 🗺️ Codebase 索引與專案地圖 (Repo Map)
+
+很多人會問：「要怎麼讓 Aider 掃描或索引我的 Codebase？」
+答案是：**全自動的，不需要手動建立 Index！**
+
+1. **背景分析**：只要你的目錄下有 `.git` (是一個 Git 儲存庫)，Aider 啟動時就會在背景自動使用 Tree-sitter 分析整個專案的結構、函數與依賴關係，並產生一份抽象的「專案地圖 (Repo Map)」。
+2. **精準且節省 Token**：有了 Repo Map，Aider 就能看懂整個專案的架構，不需要你將所有檔案都 `/add` 進去，即可進行跨檔案的推論。
+3. **`/map` 指令**：如果你想主動查看 Aider 所看到的 codebase 索引摘要（Repo Map 的內容），直接輸入 `/map` 即可顯示。
+
 ### 程式碼生成與 Git 保護
+
 當你說：「幫我把這裡的迴圈改成非同步」，Aider 會：
+
 1. **自動幫你 Commit 目前的修改**（如果有的話），確保一個乾淨的還原點。
 2. 呼叫大模型去重寫程式碼片段（Multi-file Edits）。
 3. 生成完畢後，**再幫你自動 Commit 一次**（附上 AI 產生的 `feat: ... ` 訊息）。
 
 如果它改壞了，或是你不滿意：
+
 - **`/undo`**：一秒還原上一次 AI 做的任何修改，完美反悔。
 - `/diff`：查看剛剛 AI 修改了哪些地方的差異。
 
 ### 測試、自修復與系統指令
+
 - **`/run <指令>`**：直接在 Aider 裡執行指令（例如 `/run pytest`）。如果出錯，Aider 會自動讀取錯誤訊息並提出修正方案。
 - `/clear`：清空歷史對話，開始一個全新的思路。
 - `/exit` 或 `/quit`：離開 Aider 終端機。
