@@ -105,6 +105,25 @@ aider
 2. **精準且節省 Token**：有了 Repo Map，Aider 就能看懂整個專案的架構，不需要你將所有檔案都 `/add` 進去，即可進行跨檔案的推論。
 3. **`/map` 指令**：如果你想主動查看 Aider 所看到的 codebase 索引摘要（Repo Map 的內容），直接輸入 `/map` 即可顯示。
 
+### 🎯 怎麼測試 Aider 有沒有發揮作用？
+
+當 Aider 啟動並生成完 Repo Map 後，你可以用這幾個簡單的步驟來測試連接的模型是否夠聰明、以及工具是否正常運作：
+
+1. **問一個全域性的問題（測試 Repo Map）**：
+   直接在對話框輸入：「_這個專案的主要功能是什麼？核心依賴有哪些？_」或「_這支程式的進入點 (Entry point) 在哪個檔案？_」
+   如果它回答得頭頭是道，恭喜！代表它成功看懂了你的專案架構。
+2. **做一個無害的修改（測試編輯與 Git 功能）**：
+   輸入：「_幫我在 README.md 的最下面加上一行『This project is awesome!』並且存檔。_」
+   觀察 Aider 是否會：
+   - 自動將 README.md 拉入 Context。
+   - 產生修改並存檔。
+   - 在背景幫你自動執行 `git commit`。
+3. **測試時光倒流（測試安全網）**：
+   接著輸入：**`/undo`**。
+   你會發現剛剛對 README.md 的修改，連同 Git Commit 瞬間被撤銷，專案回到完美無缺的狀態！
+
+---
+
 ### 程式碼生成與 Git 保護
 
 當你說：「幫我把這裡的迴圈改成非同步」，Aider 會：
@@ -126,7 +145,39 @@ aider
 
 ---
 
-## 5. 💡 Aider 為什麼對寫程式超級有幫助？
+## 5. 🤝 AI 代理人如何與 Aider 協作？
+
+當你正在使用 AI 代理人（例如 Antigravity）進行開發時，你可以讓 AI 代理人與 Aider 配合，達成更強大的自動化開發流程：
+
+### 模式 A：指令橋接 (Instruction Bridging)
+
+你可以在對話中直接要求 AI 代理人：「_幫我寫一個 Aider 指令來完成這個重構。_」
+AI 代理人會提供精確的指令供你複製到 Aider 終端機執行，例如：
+
+> `/add minibot/utils.py`
+> `將所有同步 I/O 改為使用 `plumbum` 的非同步操作，並確保錯誤處理符合 GEMINI.md 規範。`
+
+### 模式 B：架構師與實作者 (Architect & Implementer)
+
+這是目前最強大的協作方式：
+
+1. **AI 代理人當「架構師」**：負責高層次的邏輯規劃、產出 `implementation_plan.md`。
+2. **Aider 當「實作者」**：你將 AI 代理人的計畫直接貼給 Aider，並加上 `--architect` 參數啟動 Aider。
+3. **優點**：AI 代理人負責思考複雜的跨檔案關聯，Aider 負責執行精準的程式碼層級替換 (Search/Replace) 與自動 Commit。
+
+### 模式 C：自動化代理 (Auto-Execution)
+
+如果環境允許，AI 代理人可以直接在後端透過 `run_command` 調用 Aider：
+
+```powershell
+aider --message "修正所有 lint 錯誤" --yes
+```
+
+這可以讓 AI 代理人在發現測試失敗時，自動呼叫 Aider 進行「一鍵自修復」。
+
+---
+
+## 6. 💡 Aider 為什麼對寫程式超級有幫助？
 
 1. **Repo Map 全域護城河**：它不會只看你加進去的單一檔案，它會透過抽象語法樹 (AST) 掃描專案，不會發生「改了 A 卻讓沒看到的 B 死掉」的悲劇。
 2. **搜尋取代模式 (Search/Replace)**：LLM 不需要重寫全檔，而是精準取代目標程式碼區塊，減少格式跑版，速度飛快。
