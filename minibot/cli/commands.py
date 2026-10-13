@@ -17,7 +17,8 @@ from prompt_toolkit import PromptSession
 
 from minibot import __version__
 from minibot.bus.queue import MessageBus
-from minibot.config.loader import load_config, save_config, get_config_path
+from minibot.config.loader import ConfigError, load_config, save_config, get_config_path
+from minibot.config.schema import Config
 from minibot.i18n import init as i18n_init, t
 from minibot.providers.litellm_provider import LiteLLMProvider
 from minibot.session.manager import SessionManager
@@ -26,8 +27,24 @@ from minibot.utils.helpers import ensure_dir, get_data_path
 app = typer.Typer(help="minibot - Personal AI Assistant (powered by mini_bot)")
 console = Console()
 
-config = load_config()
-i18n_init(config_locale=config.locale)
+# i18n 需先初始化才能顯示在地化的錯誤訊息，因此這裡不讓設定錯誤中斷啟動；
+# 設定檔的錯誤留給各指令透過 _config_or_exit() 回報。
+try:
+    _startup_locale = load_config().locale
+except ConfigError:
+    # 讀不到設定時不指定 locale，讓 detect_locale 改讀 MINIBOT_LOCALE / 預設值。
+    # 若在此退回 Config()，其 locale 預設為 "en"（合法值）會反過來蓋掉環境變數。
+    _startup_locale = None
+i18n_init(config_locale=_startup_locale)
+
+
+def _config_or_exit() -> Config:
+    """載入設定；失敗時顯示明確訊息並以非零狀態結束。"""
+    try:
+        return load_config()
+    except ConfigError as e:
+        console.print(str(e), style="red")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -89,7 +106,7 @@ def agent(
     markdown: bool = typer.Option(True, "--markdown/--no-markdown"),
 ):
     """與 mini_bot Agent 互動聊天。"""
-    config = load_config()
+    config = _config_or_exit()
     provider = _make_provider(config)
     workspace = Path(config.agents.defaults.workspace).expanduser()
     ensure_dir(workspace)
@@ -150,7 +167,7 @@ def agent(
 @app.command()
 def status():
     """顯示 minibot 目前狀態。"""
-    config = load_config()
+    config = _config_or_exit()
     console.print(t("cli.status.title", version=__version__))
     console.print(t("cli.status.config", path=get_config_path()))
     console.print(t("cli.status.model", model=config.agents.defaults.model))
@@ -175,7 +192,7 @@ def config_show():
     from minibot.i18n import get_locale
     import json
 
-    config = load_config()
+    config = _config_or_exit()
     config_path = get_config_path()
 
     console.print(f"\n[bold]🔧 Config File: {config_path}[/bold]")
@@ -213,7 +230,7 @@ def config_show():
 @app.command()
 def telegram():
     """啟動 Telegram Bot（Polling 模式）。"""
-    config = load_config()
+    config = _config_or_exit()
     bot_token = config.channels.telegram.bot_token
 
     if not bot_token:

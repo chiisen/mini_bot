@@ -7,11 +7,16 @@ import hashlib
 from pathlib import Path
 from typing import Any
 from cryptography.fernet import Fernet
+from pydantic import ValidationError
 from minibot.config.schema import Config
 from minibot.i18n import t as _t
 
 _fernet: Fernet | None = None
 _encryption_key_env = "MINIBOT_CONFIG_KEY"
+
+
+class ConfigError(Exception):
+    """設定檔存在但無法讀取、解析或驗證時拋出（檔案不存在不算錯誤）。"""
 
 
 def _get_fernet() -> Fernet | None:
@@ -88,17 +93,37 @@ def get_config_path() -> Path:
 
 
 def load_config(config_path: Path | None = None) -> Config:
-    """載入設定檔，若不存在則回傳預設值。"""
+    """載入設定檔。
+
+    - 檔案不存在：回傳預設值
+    - 檔案存在但無法讀取、解析或驗證：拋出 ConfigError
+
+    過去這裡失敗時會靜默退回 Config()，導致使用者自訂的設定無聲消失，
+    因此改為明確報錯。
+    """
     path = config_path or get_config_path()
-    if path.exists():
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            data = _decrypt_sensitive_fields(data)
-            return Config.model_validate(data)
-        except Exception as e:
-            print(_t("error.config_load_failed", error=e))
-    return Config()
+    if not path.exists():
+        return Config()
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        raise ConfigError(_t("error.config_load_failed", path=path, error=e)) from e
+
+    if not isinstance(data, dict):
+        raise ConfigError(_t(
+            "error.config_load_failed",
+            path=path,
+            error="config root must be a JSON object",
+        ))
+
+    data = _decrypt_sensitive_fields(data)
+
+    try:
+        return Config.model_validate(data)
+    except ValidationError as e:
+        raise ConfigError(_t("error.config_load_failed", path=path, error=e)) from e
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:

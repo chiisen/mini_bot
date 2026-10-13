@@ -6,6 +6,10 @@
 
 ### 修正
 
+- **設定檔載入失敗不再靜默退回預設值**：`config/loader.py` 的 `load_config()` 過去在讀取／解析／驗證失敗時只印一行訊息，然後回傳 `Config()`，導致使用者自訂的 model、workspace、max_tokens 全部無聲消失。改為拋出新的 `ConfigError`（**檔案不存在仍回傳預設值**，行為不變）；同時擋掉 JSON 根值非 object 的情況（過去會在 `_decrypt_sensitive_fields` 爆 `AttributeError`）。(Why: 設定無聲遺失比啟動失敗更難察覺)
+- **CLI 明確回報設定錯誤**：`cli/commands.py` 新增 `_config_or_exit()`，設定檔損壞時顯示含路徑的錯誤訊息並以 exit code 1 結束。啟動時的 i18n 初始化不因此中斷，且 `onboard` 等指令仍可執行——使用者不會被鎖在無法修復設定的狀態。
+- **i18n 訊息語意修正**：`error.config_load_failed` 由「警告」改為「錯誤」並帶上設定檔路徑（en / zh_TW / zh_CN 三語系）。
+- **測試覆蓋**：新增 `tests/test_loader.py`，涵蓋檔案不存在／正常載入／JSON 損壞／schema 不合法／根值非 object／錯誤訊息含路徑。（測試數 19 → 25）
 - **`MINIBOT_LOCALE` 環境變數先前完全失效**：`Config.locale` 預設為 `"en"`，因其本身即為合法語系，`detect_locale()` 會直接採用而不去讀環境變數，導致 README 記載的 `export MINIBOT_LOCALE=zh_TW` 沒有任何效果。改為預設 `None` 代表「未指定」，使語系優先順序回歸 README 記載的 `config.json > 環境變數 > 預設`；設定檔明確指定時仍優先於環境變數。(Why: 文件記載的設定路徑實際不可用，與 config validator 的 TypeError 屬同一類問題)
 - **測試**：新增 `tests/test_i18n.py`（10 個測試），涵蓋語系優先順序與 `locale` 預設值；`tests/conftest.py` 的環境隔離加入 `MINIBOT_LOCALE`。
 
