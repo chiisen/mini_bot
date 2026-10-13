@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 修正
+
+- **Config 環境變數驗證器拋出 TypeError**：`config/schema.py` 的 `load_from_env` 先將 `ProviderConfig` / `TelegramConfig` 實例放入 dict，再對其做 item assignment，導致 `MINIMAX_API_KEY` 或 `TELEGRAM_BOT_TOKEN` 存在時 `Config()` 直接失敗（`TypeError: 'ProviderConfig' object does not support item assignment`）。改為純 dict 操作，並以 alias 鍵名（`apiKey` / `apiBase` / `botToken`）寫入——pydantic 在 alias 與欄位名同時存在時以 alias 為準，若寫入 snake_case 會讓 config 檔案的值反過來蓋掉環境變數。(Why: 修復 README 建議的環境變數設定路徑；該路徑失效時 `load_config()` 還會靜默退回預設值，連帶丟棄使用者的整份設定)
+- **測試環境隔離**：`tests/conftest.py` 新增 autouse fixture，清除 config 相關環境變數，避免斷言結果取決於開發機環境。(Why: 這正是上述 bug 能長期潛伏的原因——未設定金鑰的環境完全看不到問題)
+- **測試覆蓋**：`tests/test_config.py` 新增 `TestEnvOverrides`，涵蓋環境變數存在/不存在、以及環境變數覆蓋 config 檔值的雙路徑。（測試數 12 → 19）
+
 ### 修改
 
 - 將 `config.json.example` 更名為 `config.example.json`，並同步更新 README。
