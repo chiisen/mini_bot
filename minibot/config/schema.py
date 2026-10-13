@@ -80,7 +80,10 @@ class ChannelsConfig(Base):
 
 class Config(Base):
     """主配置類別。"""
-    locale: str = "en"
+    # 預設 None 代表「未指定」，讓 detect_locale 能依 README 記載的優先順序
+    # （config.json > 環境變數 > 預設）繼續往下讀 MINIBOT_LOCALE。
+    # 若預設為 "en"，因其本身是合法語系，會反過來永遠蓋掉環境變數。
+    locale: str | None = None
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)

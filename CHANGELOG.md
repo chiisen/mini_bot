@@ -10,6 +10,9 @@
 - **CLI 明確回報設定錯誤**：`cli/commands.py` 新增 `_config_or_exit()`，設定檔損壞時顯示含路徑的錯誤訊息並以 exit code 1 結束。啟動時的 i18n 初始化不因此中斷，且 `onboard` 等指令仍可執行——使用者不會被鎖在無法修復設定的狀態。
 - **i18n 訊息語意修正**：`error.config_load_failed` 由「警告」改為「錯誤」並帶上設定檔路徑（en / zh_TW / zh_CN 三語系）。
 - **測試覆蓋**：新增 `tests/test_loader.py`，涵蓋檔案不存在／正常載入／JSON 損壞／schema 不合法／根值非 object／錯誤訊息含路徑。（測試數 19 → 25）
+- **`MINIBOT_LOCALE` 環境變數先前完全失效**：`Config.locale` 預設為 `"en"`，因其本身即為合法語系，`detect_locale()` 會直接採用而不去讀環境變數，導致 README 記載的 `export MINIBOT_LOCALE=zh_TW` 沒有任何效果。改為預設 `None` 代表「未指定」，使語系優先順序回歸 README 記載的 `config.json > 環境變數 > 預設`；設定檔明確指定時仍優先於環境變數。(Why: 文件記載的設定路徑實際不可用，與 config validator 的 TypeError 屬同一類問題)
+- **測試**：新增 `tests/test_i18n.py`（10 個測試），涵蓋語系優先順序與 `locale` 預設值；`tests/conftest.py` 的環境隔離加入 `MINIBOT_LOCALE`。
+
 - **Config 環境變數驗證器拋出 TypeError**：`config/schema.py` 的 `load_from_env` 先將 `ProviderConfig` / `TelegramConfig` 實例放入 dict，再對其做 item assignment，導致 `MINIMAX_API_KEY` 或 `TELEGRAM_BOT_TOKEN` 存在時 `Config()` 直接失敗（`TypeError: 'ProviderConfig' object does not support item assignment`）。改為純 dict 操作，並以 alias 鍵名（`apiKey` / `apiBase` / `botToken`）寫入——pydantic 在 alias 與欄位名同時存在時以 alias 為準，若寫入 snake_case 會讓 config 檔案的值反過來蓋掉環境變數。(Why: 修復 README 建議的環境變數設定路徑；該路徑失效時 `load_config()` 還會靜默退回預設值，連帶丟棄使用者的整份設定)
 - **測試環境隔離**：`tests/conftest.py` 新增 autouse fixture，清除 config 相關環境變數，避免斷言結果取決於開發機環境。(Why: 這正是上述 bug 能長期潛伏的原因——未設定金鑰的環境完全看不到問題)
 - **測試覆蓋**：`tests/test_config.py` 新增 `TestEnvOverrides`，涵蓋環境變數存在/不存在、以及環境變數覆蓋 config 檔值的雙路徑。（測試數 12 → 19）

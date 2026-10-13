@@ -20,5 +20,5 @@ def isolate_config_env(monkeypatch):
     `providers.minimax.api_key == ""` 這類斷言會隨開發機環境時好時壞。
     需要驗證環境變數行為的測試，可在測試內用 monkeypatch.setenv 覆寫。
     """
-    for var in ("MINIMAX_API_KEY", "MINIMAX_API_BASE", "TELEGRAM_BOT_TOKEN"):
+    for var in ("MINIMAX_API_KEY", "MINIMAX_API_BASE", "TELEGRAM_BOT_TOKEN", "MINIBOT_LOCALE"):
         monkeypatch.delenv(var, raising=False)
