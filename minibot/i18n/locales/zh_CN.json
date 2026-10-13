@@ -21,5 +21,5 @@
     "cli.telegram.starting": "正在启动 Polling 模式... 按 Ctrl+C 停止。",
     "error.tool_execution_failed": "抱歉，执行工具时发生错误，请稍后再试。",
     "error.llm_request_failed": "抱歉，处理您的请求时发生错误，请稍后再试。",
-    "error.config_load_failed": "警告：配置文件载入失败：{error}"
+    "error.config_load_failed": "错误：配置文件载入失败（{path}）：{error}"
 }

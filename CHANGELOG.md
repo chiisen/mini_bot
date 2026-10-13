@@ -6,6 +6,10 @@
 
 ### 修正
 
+- **設定檔載入失敗不再靜默退回預設值**：`config/loader.py` 的 `load_config()` 過去在讀取／解析／驗證失敗時只印一行訊息，然後回傳 `Config()`，導致使用者自訂的 model、workspace、max_tokens 全部無聲消失。改為拋出新的 `ConfigError`（**檔案不存在仍回傳預設值**，行為不變）；同時擋掉 JSON 根值非 object 的情況（過去會在 `_decrypt_sensitive_fields` 爆 `AttributeError`）。(Why: 設定無聲遺失比啟動失敗更難察覺)
+- **CLI 明確回報設定錯誤**：`cli/commands.py` 新增 `_config_or_exit()`，設定檔損壞時顯示含路徑的錯誤訊息並以 exit code 1 結束。啟動時的 i18n 初始化不因此中斷，且 `onboard` 等指令仍可執行——使用者不會被鎖在無法修復設定的狀態。
+- **i18n 訊息語意修正**：`error.config_load_failed` 由「警告」改為「錯誤」並帶上設定檔路徑（en / zh_TW / zh_CN 三語系）。
+- **測試覆蓋**：新增 `tests/test_loader.py`，涵蓋檔案不存在／正常載入／JSON 損壞／schema 不合法／根值非 object／錯誤訊息含路徑。（測試數 19 → 25）
 - **Config 環境變數驗證器拋出 TypeError**：`config/schema.py` 的 `load_from_env` 先將 `ProviderConfig` / `TelegramConfig` 實例放入 dict，再對其做 item assignment，導致 `MINIMAX_API_KEY` 或 `TELEGRAM_BOT_TOKEN` 存在時 `Config()` 直接失敗（`TypeError: 'ProviderConfig' object does not support item assignment`）。改為純 dict 操作，並以 alias 鍵名（`apiKey` / `apiBase` / `botToken`）寫入——pydantic 在 alias 與欄位名同時存在時以 alias 為準，若寫入 snake_case 會讓 config 檔案的值反過來蓋掉環境變數。(Why: 修復 README 建議的環境變數設定路徑；該路徑失效時 `load_config()` 還會靜默退回預設值，連帶丟棄使用者的整份設定)
 - **測試環境隔離**：`tests/conftest.py` 新增 autouse fixture，清除 config 相關環境變數，避免斷言結果取決於開發機環境。(Why: 這正是上述 bug 能長期潛伏的原因——未設定金鑰的環境完全看不到問題)
 - **測試覆蓋**：`tests/test_config.py` 新增 `TestEnvOverrides`，涵蓋環境變數存在/不存在、以及環境變數覆蓋 config 檔值的雙路徑。（測試數 12 → 19）
