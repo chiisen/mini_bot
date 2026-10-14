@@ -42,25 +42,64 @@ DANGEROUS_PATTERNS = [
     ">", ">>", "<",
 ]
 
+# PowerShell 的敘述分隔與子運算式字元。
+#
+# `pwsh -Command` 會把整串指令「重新解析」一次，因此除了 `;` / `|`（已列於
+# DANGEROUS_PATTERNS）之外，換行、`&`（呼叫運算子）、反引號（跳脫字元）、
+# `$(...)` / `(...)`（子運算式）都能在同一行內接上第二道指令。此時白名單
+# 只看第一個 token（`echo`），第二道指令便完全繞過授權檢查——`echo hi & whoami`
+# 判定為允許，實際上會執行 `whoami`。
+#
+# Unix 走 argv、不經 shell，這些字元不具執行語意，故僅在 Windows 上拒絕，
+# 以免誤傷 `grep '$'` 這類正常查詢。
+WINDOWS_DANGEROUS_CHARS = "&`$()"
+
+# 一律以「路徑片段」比對，不寫結尾斜線：`ls ~/.ssh` 這種**目錄本身**的寫法
+# 在結尾斜線版本下不受檢，而 `grep -r . ~/.ssh` 同樣能印出私鑰內容。
 BLACKLISTED_PATTERNS = [
     "/etc/passwd",
     "/etc/shadow",
     "/etc/sudoers",
-    "/.ssh/",
-    "/.gnupg/",
-    "/.aws/",
-    "/.npm/",
-    "/.composer/",
+    "/.ssh",
+    "/.gnupg",
+    "/.aws",
+    "/.npm",
+    "/.composer",
 ]
 
 
 def _normalized(text: str) -> str:
-    """把反斜線統一為正斜線，讓黑名單在 Windows 路徑上同樣生效。
+    """正規化文字，讓黑名單在各種寫法下同樣生效。
 
-    黑名單樣式一律以正斜線撰寫（`/.ssh/` 等）。Windows 的 `Path` 會以反斜線
-    呈現，若不統一，`C:\\Users\\me\\.ssh\\id_rsa` 這類路徑會直接繞過檢查。
+    只修補「同一個路徑的不同寫法」，不改動語意：
+
+    - **反斜線 → 正斜線**：Windows 的 `Path` 以反斜線呈現，
+      `C:\\Users\\me\\.ssh\\id_rsa` 原本可繞過。
+    - **大小寫折疊**：macOS 與 Windows 的檔案系統預設不分大小寫，
+      `~/.SSH/id_rsa` 指向的就是同一把私鑰。
+    - **收斂重複斜線與 `/./`**：`/etc//passwd`、`/etc/./passwd` 與
+      `/etc/passwd` 是同一個檔案。
     """
-    return text.replace("\\", "/")
+    t = text.replace("\\", "/").casefold()
+    while "//" in t:
+        t = t.replace("//", "/")
+    while "/./" in t:
+        t = t.replace("/./", "/")
+    return t
+
+def _is_windows_command_safe(command: str) -> bool:
+    """指令是否不含 PowerShell 的敘述分隔／子運算式字元。
+
+    各類換行（LF / CR / VT / FF / NEL / U+2028 / U+2029）都是 PowerShell 的
+    敘述分隔；製表符只作空白分隔，維持允許。
+    """
+    for ch in command:
+        if ch in WINDOWS_DANGEROUS_CHARS:
+            return False
+        if ch != "\t" and (ord(ch) < 0x20 or ch in "\x7f\x85\u2028\u2029"):
+            return False
+    return True
+
 
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
@@ -202,6 +241,11 @@ class ShellTool(Tool):
         for pattern in DANGEROUS_PATTERNS:
             if pattern in command:
                 return False
+
+        # Windows 上指令原文會交給 `pwsh -Command` 重新解析，須另外擋掉
+        # PowerShell 專屬的敘述分隔符（見 WINDOWS_DANGEROUS_CHARS）。
+        if _is_windows() and not _is_windows_command_safe(command):
+            return False
 
         # shell 工具也必須套用檔案工具的敏感路徑黑名單，
         # 否則 `cat /etc/passwd` 會繞過檔案層的防護。

@@ -216,6 +216,32 @@ class TestShellCommandAllowlist:
         assert validate_path(r"C:\Users\me\.ssh\id_rsa") is None
         assert validate_path(r"C:\Users\me\.aws\credentials") is None
 
+    @pytest.mark.parametrize("command", [
+        # 同一個路徑的其他寫法：大小寫、`.`、`//`
+        "cat ~/.SSH/id_rsa",
+        "cat /etc/./passwd",
+        "cat /etc//passwd",
+        "cat /etc/PASSWD",
+        # 目錄本身（沒有結尾斜線）——`grep -r` 同樣能印出私鑰內容
+        "ls -la ~/.ssh",
+        "grep -r . ~/.ssh",
+        # glob 不需要結尾斜線也會命中目錄內所有檔案
+        "cat ~/.ssh*",
+    ])
+    def test_blacklist_normalizes_path_variants(self, command):
+        """黑名單必須對「同一個路徑的不同寫法」一視同仁。
+
+        回歸測試：原本樣式寫成 `/.ssh/`（含結尾斜線）且逐字元區分大小寫，
+        因此 `ls ~/.ssh`、`grep -r . ~/.ssh`、`cat ~/.SSH/id_rsa`、
+        `cat /etc/./passwd` 全部放行。macOS 與 Windows 的檔案系統預設不分
+        大小寫，這些路徑指向的確實是同一份私鑰。
+        """
+        assert ShellTool()._is_command_allowed(command) is False
+
+    def test_blacklist_normalization_does_not_over_block(self):
+        assert ShellTool()._is_command_allowed("cat a.txt") is True
+        assert ShellTool()._is_command_allowed("cat /etc/hosts") is True
+
     def test_normal_shell_command_with_backslash_not_over_blocked(self):
         """正規化不得誤傷一般指令。"""
         assert ShellTool()._is_command_allowed("ls -la") is True
@@ -476,3 +502,67 @@ class TestShellFailureVisibility:
         assert not hasattr(mod, "plumbum")
         source = Path(mod.__file__).read_text(encoding="utf-8")
         assert "plumbum" not in source
+
+
+class TestShellWindowsStatementSeparators:
+    """Windows 上 `pwsh -Command` 會重新解析指令原文，必須擋掉敘述分隔符。
+
+    回歸背景（#9 修正後才曝光的缺口）：`_build_argv()` 把整串指令交給
+    `pwsh -Command`，但白名單只看第一個 token。`echo hi & whoami` 的首個
+    token 是白名單中的 `echo` 且不含 `;` / `|`，因此判定為允許，而 PowerShell
+    會把 `&` 當成呼叫運算子執行第二道指令——等於繞過整個白名單。
+    換行、反引號、`$()` / `(...)` 同理。
+
+    Unix 走 argv、不經 shell，這些字元沒有執行語意，因此刻意不擋，
+    以免誤傷 `grep '$'` 這類正常查詢。
+    """
+
+    # 每一項都是「白名單首 token + 一道注入的第二指令」
+    BYPASS_ATTEMPTS = [
+        "echo hi\nwhoami",
+        "echo hi\r\nwhoami",
+        "echo hi & whoami",
+        "echo hi`nwhoami",
+        "echo $(whoami)",
+        "echo (Get-Process)",
+        "echo a\u2028whoami",
+        "echo a\x0bwhoami",
+        "echo a\x85whoami",
+        "python --version\ncalc",
+    ]
+
+    @pytest.fixture
+    def windows(self):
+        with patch.object(filesystem_module, "_is_windows", return_value=True):
+            yield
+
+    @pytest.fixture
+    def unix(self):
+        with patch.object(filesystem_module, "_is_windows", return_value=False):
+            yield
+
+    @pytest.mark.parametrize("command", BYPASS_ATTEMPTS)
+    def test_windows_rejects_statement_separators(self, windows, command):
+        assert ShellTool()._is_command_allowed(command) is False
+
+    def test_windows_rejects_at_execute(self, windows, workspace):
+        """授權檢查在 `execute()` 就必須生效，不可只停在 `_is_command_allowed()`。"""
+        with patch.object(subprocess, "run") as fake_run:
+            result = asyncio.run(ShellTool().execute(command="echo hi & whoami"))
+
+        fake_run.assert_not_called()
+        assert result.startswith("Error: Command not allowed")
+
+    def test_windows_still_allows_plain_commands(self, windows):
+        assert ShellTool()._is_command_allowed("ls -la") is True
+        assert ShellTool()._is_command_allowed("git status") is True
+        # 製表符只作空白分隔，不算敘述分隔
+        assert ShellTool()._is_command_allowed("ls\t-la") is True
+
+    @pytest.mark.parametrize(
+        "command",
+        ["echo hi & whoami", "echo $(whoami)", "grep '$' file", "grep '(a)' file"],
+    )
+    def test_unix_keeps_them_allowed(self, unix, command):
+        """Unix 上這些字元不具執行語意，維持允許以免過度限縮正常用法。"""
+        assert ShellTool()._is_command_allowed(command) is True

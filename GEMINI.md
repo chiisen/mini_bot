@@ -43,6 +43,8 @@ def _build_argv(self, command: str) -> list[str] | None:
 
 `-NoProfile` 避免使用者 profile 的輸出或副作用混入結果；`-NonInteractive` 避免指令等待輸入而卡到逾時。其餘平台直接以 argv 執行。兩者共用同一段 `subprocess.run` 呼叫與錯誤處理。
 
+**Windows 專屬的參數政策**：`-Command` 會把指令原文交給 PowerShell **重新解析**一次，白名單只看第一個 token，因此 `;` / `|` 以外的敘述分隔符必須另外擋下——`echo hi & whoami` 的首個 token 是允許的 `echo`，PowerShell 卻會把 `&` 當成呼叫運算子執行第二道指令。`WINDOWS_DANGEROUS_CHARS` 拒絕 `&`、反引號、`$`、`(`、`)`，以及各類換行（LF / CR / VT / FF / NEL / U+2028 / U+2029）。Unix 走 argv、不經 shell，這些字元不具執行語意，故不擋——避免誤傷 `grep '$'` 這類正常查詢。
+
 > **歷史修正**：本節曾記載以 **plumbum** 作為最終解決方案。實際上 `plumbum.local`
 > 是 `LocalMachine` 實例、不可呼叫，`local(cmd, args, shell=False)` 對任何指令
 > 都固定拋 `TypeError: 'LocalMachine' object is not callable`，該分支從未成功
@@ -55,6 +57,10 @@ def _build_argv(self, command: str) -> list[str] | None:
 CI（`.github/workflows/ci.yml`）同時在 `ubuntu-latest` 與 `windows-latest` 上執行測試。
 `TestShellWindowsEndToEnd` 只在 Windows 上跑，會實際透過 `pwsh` 執行白名單指令並
 比對 stdout——這是 Windows 路徑唯一的真實驗證來源。
+
+參數政策（白名單、敏感路徑、上述 Windows 分隔符）純屬判斷邏輯，不需真的在 Windows
+上跑：`TestShellWindowsStatementSeparators` 以 monkeypatch 覆寫 `_is_windows()`
+在任一平台驗證。`_is_windows()` 之所以獨立成函式，正是為了讓 Windows 分支可被測試。
 
 ## 4. 任務結束自檢與記錄規範 (Definition of Done)
 在完成任何功能開發、Bug 修正或重構任務後，Agent **必須主動**執行以下的「程式碼行數統計」與記錄動作，幫助追蹤專案體積變化：
