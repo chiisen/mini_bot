@@ -49,6 +49,8 @@
 
 ### 新增
 
+- **測試：LiteLLM Provider**：新增 `tests/test_litellm_provider.py`（22 個測試），以 monkeypatch 攔截 `litellm.acompletion`（**不發出任何網路請求**），涵蓋模型前綴套用（不重複加前綴、None 回退實例預設）、參數組裝（`api_base`／`tools`／`tool_choice` 條件性省略）、tool call 正規化（dict 與不合法 JSON 字串皆經 `json_repair`）、`finish_reason` 與 `usage` 映射、例外不外洩且回傳可讀訊息。`providers/litellm_provider.py` 覆蓋率 0% → 100%，整體 65% → 70%。（測試數 209 → 231）(Why: 這是唯一對外呼叫 LLM 的邊界，出錯會直接影響所有對話；且錯誤處理與參數組裝是靜默失效的高風險區)
+
 - **測試：Agent 迭代迴圈**：新增 `tests/test_agent_loop.py`（21 個測試），以 mock provider 驗證 LLM ↔ Tool 迭代流程：無 tool call 直接回覆、tool 結果的 role／`tool_call_id`／`name` 結構、assistant `tool_calls` 的 JSON 字串序列化、多個 tool call 的執行順序、`max_iterations` 硬性上限、工具輸出截斷至 10000 字元、`on_progress` 回呼、session 持久化與 `memory_window`，以及 Bus 消費模式（`run()`）的 outbound 發佈、session 分流與單則失敗不中斷迴圈。`agent/loop.py` 與 `bus/` 全數 0% → 100%，整體 49% → 65%。（測試數 188 → 209）(Why: `agent/loop.py` 是 Agent 的 orchestrator；Bus 消費模式雖無 channel 使用，仍屬公開 API，日後接線時才發現問題代價較高)
 
 - **測試：session 持久化與隔離**：新增 `tests/test_session_manager.py`（23 個測試），涵蓋訊息往返、tool metadata（`tool_calls`／`tool_call_id`／`name`）保留、owner 隔離（不符者取得空 session 且不污染快取）、快取過期清除、legacy 路徑遷移，以及損壞與空行檔案的健壯性。`session/manager.py` 覆蓋率 0% → 100%，整體 30% → 43%。（測試數 120 → 143）(Why: 此模組負責對話歷史的持久化與使用者隔離，出錯會直接遺失對話或造成跨使用者洩漏)
