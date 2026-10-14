@@ -8,7 +8,9 @@ from minibot.agent.memory import MemoryStore
 
 INJECTION_PATTERNS = [
     r"^\s*ignore\s+(previous|above|prior)",
-    r"^\s*(system|admin|root)",
+    # 要求冒號分隔，否則 "root cause analysis"、"admin panel"、"systemd service"
+    # 等正常輸入會被誤傷（本條是唯一攔截 `admin:` / `root:` 的規則，不可移除）。
+    r"^\s*(system|admin|root)\s*:",
     r"(?i)you\s+(are\s+)?(now|just|simply)\s+a\s+(code|script)",
     r"(?i)forget\s+(everything|all|your)\s+(instructions|rules)",
     r"(?i)new\s+instructions:",

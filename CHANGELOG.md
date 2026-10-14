@@ -6,6 +6,10 @@
 
 ### 修正
 
+- **注入過濾誤傷以 system/admin/root 開頭的正常輸入**：`INJECTION_PATTERNS` 的 `^\s*(system|admin|root)` 只檢查字串開頭，不看後續內容，導致 `root cause analysis`、`admin panel`、`systemd service`、`rootkit detection` 等技術問答中極常見的詞語被剝掉關鍵詞，Agent 收到殘缺句子且使用者不知情。改為要求冒號分隔（`^\s*(system|admin|root)\s*:`），保留角色冒充的結構性特徵。(Why: 角色冒充的特徵是「角色: 內容」，而非單純以字根開頭；實測修正後攻擊樣本 0 漏網、正常輸入 0 誤傷)
+
+> **注意**：`admin:` 與 `root:` 的攔截**完全依賴此條** —— 第 6 條 `system\s*:\s*` 僅涵蓋 system。已加註解說明並補上回歸測試鎖定此相依性。
+
 - **`list_sessions()` 在 metadata 缺 `updated_at` 時整批崩潰**：`sorted()` 的鍵值取用 `.get("updated_at", "")`，但此處要處理的是「鍵存在、值為 `None`」而非「鍵不存在」，因此預設值無效，`None` 與 `str` 比較會拋 `TypeError`。單一筆異常 session 檔就會讓整個列表失敗。改為 `.get("updated_at") or ""`，並讓缺時間戳的 session 排在最後。(Why: 修正 #17；`list_sessions()` 目前雖無呼叫點，但 #5 要實作的 Session 管理指令必然會用到)
 
 - **ShellTool 無法執行帶參數的指令**：`execute()` 的子命令檢查把「第一個參數」當成「子命令」，而 `ALLOWED_COMMANDS` 對單字指令（`ls`、`cat`…）只把指令名放進自己的清單，導致 `ls -la`、`cat <file>`、`echo hi`、`mkdir <dir>` 一律被拒——Unix 上幾乎只能執行無參數指令（`git` 因清單恰好包含子命令名而僥倖可用）。改為明確定義參數政策：
