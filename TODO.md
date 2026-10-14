@@ -2,30 +2,49 @@
 
 > 本檔是待辦事項的**優先序索引**。細節以 GitHub Issue 為準，此處只記錄排序理由，以及尚未開成 issue 的項目。
 >
-> 最後更新：2026-10-13
+> 最後更新：2026-10-14
 
 ## 目前狀態
 
 | 指標 | 值 |
 |---|---|
-| 測試 | 35 passed（`python -m pytest tests/ -q`） |
-| 套件行數 | 1,658（`GEMINI.md` §1「千行約定」目標約 1,000） |
-| CI | **尚未建立**（無 `.github/workflows`） |
+| 測試 | 120 passed（`python -m pytest tests/ -q`） |
+| 覆蓋率 | 30%（`--cov=minibot`） |
+| 套件行數 | 1,677（`GEMINI.md` §1「千行約定」目標約 1,000） |
+| CI | ✅ `.github/workflows/ci.yml`（push / PR 時執行 pytest） |
 | 開啟的 issue | 7 |
 
 ## 待辦（依建議順序）
 
-### 1. 補「設定齊備路徑」的測試 — [#1](https://github.com/chiisen/mini_bot/issues/1)
+### 1. 補其餘核心模組的測試 — [#1](https://github.com/chiisen/mini_bot/issues/1)
 
-現有測試集中在預設路徑。應優先覆蓋**預設環境不會執行到的分支**：環境變數存在、設定檔有值、兩者同時存在。
+`config/`、`i18n/`、`loader` 與 `agent/tools/filesystem.py` 已有測試（整體 30%），其餘仍為 **0%**：
 
-> **排序理由**：PR [#10](https://github.com/chiisen/mini_bot/pull/10) 之前，`Config` 的 env validator 在 `MINIMAX_API_KEY` 存在時會拋 `TypeError`，卻躲過了數個 commit —— 因為 CI 與未設定金鑰的開發機**永遠跑不到那條路徑**。
+| 模組 | 行數 | 覆蓋率 |
+|---|---|---|
+| `cli/commands.py` | 159 | 0% |
+| `session/manager.py` | 118 | 0% |
+| `agent/loop.py` | 69 | 0% |
+| `providers/litellm_provider.py` | 47 | 0% |
+| `channels/telegram.py` | 39 | 0% |
 
-### 2. 建立 CI — 尚未開 issue
+> **優先原則**：優先覆蓋「**預設環境不會執行到的分支**」，而非單純衝高行數。
+> PR [#10](https://github.com/chiisen/mini_bot/pull/10) 之前，`Config` 的 env validator 在 `MINIMAX_API_KEY` 存在時會拋 `TypeError`，卻躲過了數個 commit —— 因為未設定金鑰的開發機**永遠跑不到那條路徑**。
 
-以 GitHub Actions 執行 `pytest`。repo 為 public，Actions 額度不受限。
+### 2. `validate_path()` 以行程 CWD 解析相對路徑 — 尚未開 issue
 
-> **注意其天花板**：CI 沒有 secrets，因此「設定齊備」的路徑本質上驗證不到。**CI 是回歸防護，不是這類 bug 的偵測器。**
+`validate_path()` 使用 `Path(path).resolve()`，相對路徑會以**行程 CWD** 解析，但沙盒邊界是 workspace。而 `ContextBuilder` 的 system prompt 告訴模型「Working directory 就是 workspace」，模型照著用相對路徑的結果是一律被拒：
+
+```
+system prompt:  Working directory: <workspace>
+實際 CWD:       <專案目錄>
+read_file("AGENTS.md") -> Error: Access denied. Path must be within workspace
+```
+
+**影響**：所有檔案工具都必須使用絕對路徑才動得了，與 prompt 宣告不符。
+**需要決定**：相對路徑應以 workspace 還是 CWD 為基準？這是語意決策而非單純修正。
+
+> CI 已建立（見上方狀態表），但其天花板不變：沒有 secrets，驗證不到「設定齊備」的路徑。**CI 是回歸防護，不是這類 bug 的偵測器。**
 
 ### 3. Windows ShellTool 無法運作 — [#9](https://github.com/chiisen/mini_bot/issues/9)
 
@@ -45,7 +64,7 @@
 
 ### 最後考慮 / 建議關閉 — [#2](https://github.com/chiisen/mini_bot/issues/2)
 
-Telegram channel 未走 `MessageBus`。接線會增加程式碼卻沒有使用者可見價值，且專案已超出自身的行數目標（1,658 / ~1,000），建議**收斂而非擴建**。
+Telegram channel 未走 `MessageBus`。接線會增加程式碼卻沒有使用者可見價值，且專案已超出自身的行數目標（1,677 / ~1,000），建議**收斂而非擴建**。
 
 ## 其他已知事項
 

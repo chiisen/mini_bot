@@ -6,6 +6,15 @@
 
 ### 修正
 
+- **ShellTool 無法執行帶參數的指令**：`execute()` 的子命令檢查把「第一個參數」當成「子命令」，而 `ALLOWED_COMMANDS` 對單字指令（`ls`、`cat`…）只把指令名放進自己的清單，導致 `ls -la`、`cat <file>`、`echo hi`、`mkdir <dir>` 一律被拒——Unix 上幾乎只能執行無參數指令（`git` 因清單恰好包含子命令名而僥倖可用）。改為明確定義參數政策：
+  - 唯讀指令（`ls`／`cat`／`head`／`tail`／`grep`／`pwd`／`echo`／`mkdir`／`touch`）允許任意參數
+  - 具副作用指令只開放列舉的子命令：`git` 僅 `status`／`log`／`diff`／`branch`；`pip`、`curl`、`npm`、`node`、`python` 僅查詢類（`--version`／`list`）
+  - `find`（`-delete`／`-exec` 可破壞檔案）與 `cd` 移出白名單
+  - 授權判斷集中於 `_is_command_allowed()`，`execute()` 不再重複檢查，避免兩處邏輯漂移
+  - 同時把檔案工具的敏感路徑黑名單套用到 shell 參數，補上 `cat /etc/passwd` 可繞過檔案層防護的缺口
+  (Why: 修正後仍維持 fail-closed——未列舉的子命令一律拒絕，實測 `git reset --hard`、`git push --force`、`find . -delete`、`pip install <任意套件>`、`cat /etc/passwd`、`curl <url>` 皆無法執行；後三者分別對應任意程式碼執行、敏感檔案洩漏與網路外傳)
+- **測試**：`tests/test_tools_filesystem.py` 增補參數政策與端到端執行測試（測試數 86 → 120）；`filesystem.py` 覆蓋率 70% → 88%，整體 28% → 30%。
+
 - **設定檔載入失敗不再靜默退回預設值**：`config/loader.py` 的 `load_config()` 過去在讀取／解析／驗證失敗時只印一行訊息，然後回傳 `Config()`，導致使用者自訂的 model、workspace、max_tokens 全部無聲消失。改為拋出新的 `ConfigError`（**檔案不存在仍回傳預設值**，行為不變）；同時擋掉 JSON 根值非 object 的情況（過去會在 `_decrypt_sensitive_fields` 爆 `AttributeError`）。(Why: 設定無聲遺失比啟動失敗更難察覺)
 - **CLI 明確回報設定錯誤**：`cli/commands.py` 新增 `_config_or_exit()`，設定檔損壞時顯示含路徑的錯誤訊息並以 exit code 1 結束。啟動時的 i18n 初始化不因此中斷，且 `onboard` 等指令仍可執行——使用者不會被鎖在無法修復設定的狀態。
 - **i18n 訊息語意修正**：`error.config_load_failed` 由「警告」改為「錯誤」並帶上設定檔路徑（en / zh_TW / zh_CN 三語系）。

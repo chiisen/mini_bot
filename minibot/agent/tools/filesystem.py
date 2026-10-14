@@ -4,25 +4,42 @@ import subprocess
 from pathlib import Path
 from minibot.agent.tools.base import Tool
 
-ALLOWED_COMMANDS = {
-    "ls": ["ls"],
-    "cat": ["cat"],
-    "head": ["head"],
-    "tail": ["tail"],
-    "grep": ["grep"],
-    "find": ["find"],
-    "mkdir": ["mkdir"],
-    "touch": ["touch"],
-    "echo": ["echo"],
-    "pwd": ["pwd"],
-    "cd": None,
-    "git": ["git", "status", "log", "diff", "add", "commit", "push", "pull", "branch"],
-    "npm": ["npm", "--version"],
-    "node": ["node", "--version"],
-    "python": ["python", "--version"],
-    "pip": ["pip", "list", "install"],
-    "curl": ["curl", "--version"],
+# 參數政策：
+#   ARGS_ANY —— 唯讀指令，允許任意參數（仍受危險字元與敏感路徑檢查）
+#   set      —— 具副作用指令，只允許清單中出現的子命令
+#
+# 注意：具副作用指令一律要求明確列出子命令。`git` 只開放讀取類操作，
+# `pip` / `curl` 等只開放查詢版本或列表——因為 `pip install <任意套件>`
+# 等同任意程式碼執行。
+ARGS_ANY = "*"
+
+ALLOWED_COMMANDS: dict[str, str | set[str]] = {
+    # 唯讀：不改變系統狀態
+    "ls": ARGS_ANY,
+    "cat": ARGS_ANY,
+    "head": ARGS_ANY,
+    "tail": ARGS_ANY,
+    "grep": ARGS_ANY,
+    "pwd": ARGS_ANY,
+    "echo": ARGS_ANY,
+    # 建立檔案／目錄：具副作用，但限於執行者權限內
+    "mkdir": ARGS_ANY,
+    "touch": ARGS_ANY,
+    # 具副作用：只允許明確列出的子命令
+    "git": {"status", "log", "diff", "branch"},
+    "pip": {"--version", "list"},
+    "curl": {"--version"},
+    "npm": {"--version"},
+    "node": {"--version"},
+    "python": {"--version"},
 }
+
+# 串接、重導向與其他可注入任意指令的樣式
+DANGEROUS_PATTERNS = [
+    "rm -rf", "rm /", "dd if=", "mkfs", ":(){:|:&};:",
+    "curl | sh", "wget | sh", "&&", "||", ";", "|",
+    ">", ">>", "<",
+]
 
 BLACKLISTED_PATTERNS = [
     "/etc/passwd",
@@ -103,15 +120,6 @@ class ShellTool(Tool):
                 if not cmd_parts:
                     return "Error: Empty command"
 
-                allowed_cmd = ALLOWED_COMMANDS.get(cmd_parts[0])
-                if allowed_cmd is None:
-                    return f"Error: Command '{cmd_parts[0]}' not in allowed list"
-
-                if allowed_cmd and len(cmd_parts) > 1:
-                    sub_cmd = cmd_parts[1]
-                    if allowed_cmd is not None and sub_cmd not in allowed_cmd:
-                        return f"Error: Subcommand '{sub_cmd}' not allowed for '{cmd_parts[0]}'"
-
                 result = subprocess.run(
                     cmd_parts,
                     shell=False,
@@ -130,16 +138,20 @@ class ShellTool(Tool):
             return f"Error: {e}"
 
     def _is_command_allowed(self, command: str) -> bool:
-        """Check if command is in whitelist."""
-        if not command or len(command.strip()) == 0:
+        """檢查指令是否符合參數政策。
+
+        這是唯一的授權判斷點：`execute()` 不再重複檢查，避免兩處邏輯漂移。
+        """
+        if not command or not command.strip():
             return False
 
-        dangerous_patterns = [
-            "rm -rf", "rm /", "dd if=", "mkfs", ":(){:|:&};:",
-            "curl | sh", "wget | sh", "&&", "||", ";", "|",
-            ">", ">>", "<"
-        ]
-        for pattern in dangerous_patterns:
+        for pattern in DANGEROUS_PATTERNS:
+            if pattern in command:
+                return False
+
+        # shell 工具也必須套用檔案工具的敏感路徑黑名單，
+        # 否則 `cat /etc/passwd` 會繞過檔案層的防護。
+        for pattern in BLACKLISTED_PATTERNS:
             if pattern in command:
                 return False
 
@@ -147,7 +159,14 @@ class ShellTool(Tool):
         if not cmd_parts:
             return False
 
-        return cmd_parts[0] in ALLOWED_COMMANDS
+        policy = ALLOWED_COMMANDS.get(cmd_parts[0])
+        if policy is None:
+            return False
+        if policy == ARGS_ANY:
+            return True
+
+        # 具副作用指令：必須明確使用允許的子命令
+        return len(cmd_parts) > 1 and cmd_parts[1] in policy
 
 
 class ReadFileTool(Tool):

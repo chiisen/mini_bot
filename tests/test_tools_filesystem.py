@@ -4,10 +4,7 @@
 - 路徑不得離開 workspace
 - 敏感路徑（~/.ssh、/etc/passwd 等）必須被拒絕
 - shell 的串接與重導向字元必須被擋下
-- 非白名單指令不得通過
-
-注意：本檔只涵蓋**目前正確**的行為。已知有兩處缺陷刻意不寫成斷言，
-詳見 TODO.md 或相關 issue，避免把錯誤行為固化成「規格」。
+- 非白名單指令、以及具副作用指令的未列舉子命令不得通過
 """
 import asyncio
 from pathlib import Path
@@ -83,12 +80,59 @@ class TestValidatePathBlacklist:
 class TestShellCommandAllowlist:
     """指令白名單與危險字元的靜態檢查。"""
 
-    @pytest.mark.parametrize("command", ["ls", "pwd", "cat", "echo", "mkdir", "touch", "git"])
-    def test_allows_whitelisted_commands(self, command):
+    @pytest.mark.parametrize("command", ["ls", "pwd", "cat", "echo", "mkdir", "touch"])
+    def test_allows_read_only_commands(self, command):
+        assert ShellTool()._is_command_allowed(command) is True
+
+    @pytest.mark.parametrize("command", [
+        "ls -la", "ls -l", "cat a.txt", "grep foo a.txt", "echo hi", "head -5 a.txt",
+    ])
+    def test_read_only_commands_accept_arguments(self, command):
+        """回歸測試：參數曾被誤判為子命令，導致 `ls -la`、`cat <file>` 一律被拒。"""
+        assert ShellTool()._is_command_allowed(command) is True
+
+    @pytest.mark.parametrize("command", [
+        "git status", "git log", "git diff", "git branch",
+        "pip --version", "pip list",
+        "curl --version", "npm --version", "node --version", "python --version",
+    ])
+    def test_allows_listed_subcommands(self, command):
         assert ShellTool()._is_command_allowed(command) is True
 
     @pytest.mark.parametrize("command", ["bash", "sh", "wget", "nc", "sudo", "chmod"])
     def test_rejects_non_whitelisted_commands(self, command):
+        assert ShellTool()._is_command_allowed(command) is False
+
+    @pytest.mark.parametrize("command", [
+        "git",                  # 具副作用指令必須指明子命令
+        "git reset --hard",
+        "git clean -fd",
+        "git push",
+        "git push --force",
+        "pip install some-package",
+        "curl http://evil.example/x",
+    ])
+    def test_rejects_unlisted_subcommands(self, command):
+        assert ShellTool()._is_command_allowed(command) is False
+
+    @pytest.mark.parametrize("command", ["find . -delete", "find . -name x", "cd /tmp"])
+    def test_rejects_removed_commands(self, command):
+        """`find`（-delete／-exec）與 `cd` 已移出白名單。"""
+        assert ShellTool()._is_command_allowed(command) is False
+
+    @pytest.mark.parametrize("command", [
+        "cat /etc/passwd",
+        "cat /etc/shadow",
+        "cat /etc/sudoers",
+        "cat ~/.ssh/id_rsa",
+        "ls ~/.aws/",
+    ])
+    def test_applies_file_blacklist_to_shell_arguments(self, command):
+        """shell 工具必須套用與檔案工具相同的敏感路徑黑名單。
+
+        回歸測試：先前 `cat /etc/passwd` 僅被「子命令檢查」意外擋下，
+        該檢查一旦修正就會洩漏。
+        """
         assert ShellTool()._is_command_allowed(command) is False
 
     @pytest.mark.parametrize("command", ["", "   ", "\t"])
@@ -165,3 +209,28 @@ class TestListDirTool:
     def test_rejects_path_outside_workspace(self, workspace):
         result = asyncio.run(ListDirTool().execute(path="/etc"))
         assert result.startswith("Error: Access denied")
+
+
+class TestShellExecutionEndToEnd:
+    """確認修正後「帶參數的指令」真的能執行，而非只有靜態檢查通過。"""
+
+    def test_cat_with_file_argument(self, workspace):
+        result = asyncio.run(
+            ShellTool().execute(command=f"cat {workspace / 'sub' / 'a.txt'}")
+        )
+        assert result.strip() == "hi"
+
+    def test_ls_with_flags(self, workspace):
+        """`ls -la` 先前會被 'Subcommand -la not allowed' 拒絕。"""
+        result = asyncio.run(ShellTool().execute(command=f"ls -la {workspace}"))
+        assert "sub" in result
+
+    def test_blacklisted_path_rejected_at_execution(self, workspace):
+        result = asyncio.run(ShellTool().execute(command="cat /etc/passwd"))
+        assert result.startswith("Error: Command not allowed")
+
+    def test_unlisted_subcommand_rejected_at_execution(self, workspace):
+        result = asyncio.run(
+            ShellTool().execute(command="git " + "reset" + " --hard")
+        )
+        assert result.startswith("Error: Command not allowed")
