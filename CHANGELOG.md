@@ -35,6 +35,8 @@
 
 ### 新增
 
+- **測試：session 持久化與隔離**：新增 `tests/test_session_manager.py`（23 個測試），涵蓋訊息往返、tool metadata（`tool_calls`／`tool_call_id`／`name`）保留、owner 隔離（不符者取得空 session 且不污染快取）、快取過期清除、legacy 路徑遷移，以及損壞與空行檔案的健壯性。`session/manager.py` 覆蓋率 0% → 100%，整體 30% → 43%。（測試數 120 → 143）(Why: 此模組負責對話歷史的持久化與使用者隔離，出錯會直接遺失對話或造成跨使用者洩漏)
+
 - **CI（GitHub Actions）**：新增 `.github/workflows/ci.yml`，在 `push` 到 `main` 與 `pull_request` 時安裝 `.[test]` 並執行 `pytest`（附覆蓋率報告），Python 3.11。(Why: 專案先前沒有任何自動化關卡，而這幾天發現的缺陷恰好都藏在測試未覆蓋的路徑上；開發策略改為直接在 `main` 開發後，CI 成為唯一能自動攔截退化風險的機制。**注意其天花板**：CI 沒有 secrets，因此「設定齊備」的路徑仍驗證不到)
 
 - **測試：沙盒與 Shell 白名單**：新增 `tests/test_tools_filesystem.py`（51 個測試），涵蓋 `validate_path()` 的 workspace 邊界與敏感路徑黑名單、Shell 指令白名單與危險字元（串接、重導向）、以及 `read_file` / `write_file` / `list_dir` 的存取控制。`agent/tools/filesystem.py` 覆蓋率 0% → 70%，整體 17% → 28%。（測試數 35 → 86）(Why: 此模組是 Agent 的安全邊界卻完全沒有測試，且不需要 API key 或網路即可驗證)
