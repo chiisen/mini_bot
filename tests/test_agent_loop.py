@@ -6,8 +6,8 @@
 - `max_iterations` 是硬性上限
 - 工具輸出注入 messages 前會被截斷
 
-已知缺口（工具結果未經過濾）刻意**未寫成斷言** —— 它是 #4 追蹤的
-未修項目，先固化成斷言會讓日後修正更困難。
+工具輸出會以 `<tool_output>` 邊界標記包住（#4），因此斷言內容時需先解開邊界；
+`unwrap_tool_output()` 即為此用途。
 """
 import asyncio
 import json
@@ -17,6 +17,13 @@ import pytest
 from minibot.agent.loop import AgentLoop
 from minibot.bus.queue import MessageBus
 from minibot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+
+
+def unwrap_tool_output(content: str) -> str:
+    """取出 `<tool_output ...>` 邊界內的原始內容。"""
+    assert content.startswith("<tool_output tool="), content[:40]
+    assert content.endswith("</tool_output>"), content[-40:]
+    return content.split(">\n", 1)[1][: -len("\n</tool_output>")]
 
 
 class ScriptedProvider(LLMProvider):
@@ -102,7 +109,7 @@ class TestToolCallFlow:
         assert len(tool_msgs) == 1
         assert tool_msgs[0]["tool_call_id"] == "abc"
         assert tool_msgs[0]["name"] == "read_file"
-        assert tool_msgs[0]["content"] == "hi"
+        assert unwrap_tool_output(tool_msgs[0]["content"]) == "hi"
 
     def test_assistant_tool_calls_serialized_as_json_string(self, workspace):
         """LLM API 要求 tool_calls 的 function.arguments 是 JSON 字串。"""
@@ -192,7 +199,7 @@ class TestToolOutputTruncation:
         asyncio.run(make_loop(provider, workspace).process_direct("讀大檔"))
 
         tool_msg = [m for m in provider.calls[1] if m["role"] == "tool"][0]
-        assert len(tool_msg["content"]) == 10000
+        assert len(unwrap_tool_output(tool_msg["content"])) == 10000
 
     def test_short_output_not_truncated(self, workspace):
         provider = ScriptedProvider([
@@ -202,7 +209,7 @@ class TestToolOutputTruncation:
         asyncio.run(make_loop(provider, workspace).process_direct("讀檔"))
 
         tool_msg = [m for m in provider.calls[1] if m["role"] == "tool"][0]
-        assert tool_msg["content"] == "hi"
+        assert unwrap_tool_output(tool_msg["content"]) == "hi"
 
 
 class TestOnProgress:

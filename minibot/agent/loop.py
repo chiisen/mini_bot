@@ -94,7 +94,8 @@ class AgentLoop:
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "name": tc.name,
-                    "content": str(result)[:10000],
+                    # 工具輸出是不可信輸入，加邊界標記（見 ContextBuilder.wrap_tool_output）
+                    "content": self.context.wrap_tool_output(tc.name, str(result)[:10000]),
                 })
 
                 if on_progress:
