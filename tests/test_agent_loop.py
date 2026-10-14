@@ -332,6 +332,41 @@ class TestBusRunLoop:
                 InboundMessage(channel="t", sender_id="u", chat_id="u", content="q2")
             )
             try:
+                first = await asyncio.wait_for(loop.bus.consume_outbound(), 2.0)
+                second = await asyncio.wait_for(loop.bus.consume_outbound(), 2.0)
+                return first, second
+            finally:
+                loop.stop()
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        failed, recovered = asyncio.run(scenario())
+
+        # 失敗的那則必須有回覆，否則使用者只會看到靜默無回應
+        assert failed.content
+        assert "error" in failed.content.lower()
+        # 且迴圈必須繼續，下一則仍能正常處理
+        assert recovered.content == "恢復後回覆"
+
+    def test_outbound_carries_routing_metadata(self, workspace):
+        """頻道靠 metadata 決定回覆對象，故 run() 必須原樣帶回。"""
+        from minibot.bus.events import InboundMessage
+
+        loop = make_loop(ScriptedProvider([LLMResponse(content="ok")]), workspace)
+
+        async def scenario():
+            task = asyncio.ensure_future(loop.run())
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="tg",
+                sender_id="1",
+                chat_id="user_1",
+                content="hi",
+                metadata={"reply_chat_id": 999},
+            ))
+            try:
                 return await asyncio.wait_for(loop.bus.consume_outbound(), 2.0)
             finally:
                 loop.stop()
@@ -342,7 +377,8 @@ class TestBusRunLoop:
                     pass
 
         outbound = asyncio.run(scenario())
-        assert outbound.content == "恢復後回覆"
+        assert outbound.chat_id == "user_1"
+        assert outbound.metadata["reply_chat_id"] == 999
 
     def test_stop_sets_running_false(self, workspace):
         loop = make_loop(ScriptedProvider([]), workspace)

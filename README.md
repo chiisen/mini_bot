@@ -20,12 +20,14 @@
 ```mermaid
 flowchart TD
     subgraph 輸入通道
-        CLI[CLI: minibot agent] --> |文字輸入| Bus
+        CLI[CLI: minibot agent] --> |文字輸入<br/>同步逐輪| AgentLoop
         TG[Telegram Bot] --> |Polling| Bus
     end
 
     subgraph 核心引擎
         Bus --> |訊息| AgentLoop[Agent Loop]
+        AgentLoop --> |回覆| Bus
+        Bus --> |outbound| TG
         
         AgentLoop --> Context[Context Builder]
         Context --> |system prompt + 歷史訊息| LLM[LLM Provider]

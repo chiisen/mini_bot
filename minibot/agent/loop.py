@@ -13,6 +13,7 @@ from minibot.agent.tools.registry import ToolRegistry
 from minibot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool, ShellTool, set_workspace
 from minibot.bus.events import InboundMessage, OutboundMessage
 from minibot.bus.queue import MessageBus
+from minibot.i18n import t
 from minibot.providers.base import LLMProvider
 from minibot.session.manager import Session, SessionManager
 
@@ -124,7 +125,13 @@ class AgentLoop:
         return final_content
 
     async def run(self) -> None:
-        """Bus 消費迴圈（Gateway 模式用）。"""
+        """Bus 消費迴圈（Gateway 模式用）。
+
+        單一消費者，因此所有入站訊息會被序列化處理。這正是 Telegram 需要的：
+        python-telegram-bot 預設併發處理更新，直接呼叫 `process_direct()` 時
+        同一使用者的相鄰訊息會交錯寫入 session，產生
+        `user, user, assistant, assistant` 這種永久損壞的歷史。
+        """
         self._running = True
         while self._running:
             msg = await self.bus.consume_inbound()
@@ -133,13 +140,18 @@ class AgentLoop:
                     msg.content,
                     session_key=msg.session_key,
                 )
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=result,
-                ))
             except Exception as e:
                 logger.error("Error processing message: {}", e)
+                # 只寫日誌等於讓使用者靜默無回應，必須把失敗送回頻道
+                result = t("error.llm_request_failed")
+
+            # metadata 一併回傳：頻道用它記路由資訊（例如實際回覆對象）
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=result,
+                metadata=msg.metadata,
+            ))
 
     def stop(self):
         """停止 Bus 消費迴圈。"""
