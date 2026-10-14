@@ -28,6 +28,14 @@
 
 ### 修改
 
+- **移除 `TODO.md`**：該檔原本被當作待辦的終點，但依 `AI_GITHUB_PROJECT_GUIDE.md` §1，待辦應建立為 GitHub Issues 以利追蹤。內容已全部遷移後刪除：
+  - 相對路徑解析缺陷 → [#15](https://github.com/chiisen/mini_bot/issues/15)
+  - Session 逾時跨行程失效 → [#16](https://github.com/chiisen/mini_bot/issues/16)
+  - `list_sessions()` 崩潰 → [#17](https://github.com/chiisen/mini_bot/issues/17)
+  - 覆蓋率缺口與 CI 的驗證天花板 → [#1](https://github.com/chiisen/mini_bot/issues/1) 評論
+  - `.opencode/package-lock.json` 未忽略 → [#18](https://github.com/chiisen/mini_bot/issues/18)
+  - README 失效連結 → [#19](https://github.com/chiisen/mini_bot/issues/19)
+
 - 將 `config.json.example` 更名為 `config.example.json`，並同步更新 README。
 - **文件與安裝優化**：更新 README.md 快速開始指令，修正 macOS/Unix 環境下的 `cp` 指令、路徑斜線問題，並建議使用 `python3 -m pip install -e .` 確保安裝正確。 (Why: 解決 macOS 使用者在初始化過程中的指令報錯)
 - **README 視覺優化**：為 README.md 增加情緒符號 (Emojis)，提升閱讀體驗與親和力。(Why: 讓文件更生動)
