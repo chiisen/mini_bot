@@ -1,6 +1,5 @@
 """LiteLLM-based provider."""
 
-import os
 import json_repair
 from typing import Any
 from loguru import logger
@@ -23,10 +22,10 @@ class LiteLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.model = model
         self.litellm_prefix = litellm_prefix
-        # 設定環境變數供 LiteLLM 使用
-        os.environ[env_key] = api_key
-        if api_base:
-            os.environ["MINIMAX_API_BASE"] = api_base
+        # 憑證一律透過 chat() 的 `api_key` / `api_base` 參數傳給 LiteLLM，
+        # 不寫入 os.environ：寫入會讓金鑰洩漏給子行程，且 api_base 的變數名
+        # 與實際 provider 無關（見 #3）。
+        # `env_key` 保留僅為相容既有呼叫端，實際不再產生任何環境變數。
         litellm.drop_params = True
 
     def _prefixed_model(self, model: str | None) -> str:

@@ -2,8 +2,8 @@
 
 `litellm.acompletion` 全程被 monkeypatch，**不發出任何網路請求**。
 
-環境變數的寫入行為（#3）刻意**未寫成斷言**——它是待修的缺陷，
-先固化成斷言會讓日後修正更困難。
+建構 provider **不得寫入任何環境變數**（#3 已修正）——憑證只經由
+`chat()` 的參數傳遞，下方 `TestNoEnvPollution` 固化此約束。
 """
 import asyncio
 
@@ -14,22 +14,19 @@ from minibot.providers.litellm_provider import LiteLLMProvider
 
 @pytest.fixture
 def make_provider():
-    """建立 provider 時不污染真實環境變數。"""
+    """建立 provider，並擋下任何環境變數寫入。"""
     import os
-
-    created = []
 
     def factory(**kwargs):
         kwargs.setdefault("api_key", "test-key")
         kwargs.setdefault("model", "default-model")
         kwargs.setdefault("env_key", "MINIBOT_TEST_PROVIDER_KEY")
-        provider = LiteLLMProvider(**kwargs)
-        created.append(kwargs["env_key"])
-        return provider
+        return LiteLLMProvider(**kwargs)
 
     yield factory
 
-    for key in created:
+    # 修正後本就不應寫入；此處清掉殘留，避免污染其他測試
+    for key in ("MINIBOT_TEST_PROVIDER_KEY", "MINIMAX_API_BASE"):
         os.environ.pop(key, None)
 
 
@@ -202,36 +199,64 @@ class TestErrorHandling:
         assert result.has_tool_calls is False
 
 
-class TestGlobalSideEffect:
-    """環境變數寫入的後果（#3）——已記錄但尚未修正。"""
+class TestNoEnvPollution:
+    """建構 provider 不得寫入環境變數（#3 已修正）。"""
 
-    def test_second_instance_overwrites_env_key(self, make_provider):
-        """第二個實例會覆寫環境變數，但實例本身仍保有各自的 api_key。"""
+    def test_creating_provider_writes_no_env_key(self, make_provider, monkeypatch):
+        """憑證不得寫進 os.environ——那會洩漏給所有子行程。"""
         import os
 
-        first = make_provider(api_key="first-secret")
+        monkeypatch.delenv("MINIBOT_TEST_PROVIDER_KEY", raising=False)
+        make_provider(api_key="first-secret")
         make_provider(api_key="second-secret")
 
-        assert os.environ["MINIBOT_TEST_PROVIDER_KEY"] == "second-secret"
-        # 實例狀態未被污染——chat() 使用 self.api_key
-        assert first.api_key == "first-secret"
+        assert "MINIBOT_TEST_PROVIDER_KEY" not in os.environ
 
-    def test_api_base_env_key_is_hardcoded(self, make_provider):
-        """`MINIMAX_API_BASE` 與 env_key 無關，為硬編碼。"""
+    def test_api_base_does_not_leak_into_minimax_env(self, make_provider, monkeypatch):
+        """OpenRouter 的 api_base 不可寫進 MINIMAX_API_BASE。
+
+        `config.schema` 會以 `MINIMAX_API_BASE` 作為 MiniMax 的 apiBase 後備值，
+        污染會讓 MiniMax 請求被導向其他 provider 的端點。
+        """
         import os
 
-        os.environ.pop("MINIMAX_API_BASE", None)
-        make_provider(api_key="k", api_base="https://x.invalid")
-        assert os.environ["MINIMAX_API_BASE"] == "https://x.invalid"
-        os.environ.pop("MINIMAX_API_BASE", None)
+        monkeypatch.delenv("MINIMAX_API_BASE", raising=False)
+        make_provider(api_key="k", api_base="https://openrouter.ai/api/v1")
 
-    def test_key_is_inherited_by_child_process(self, make_provider):
-        """實質風險：API key 會擴散到子行程環境。"""
+        assert "MINIMAX_API_BASE" not in os.environ
+
+    def test_key_is_not_inherited_by_child_process(self, make_provider):
+        """實質風險回歸測試：子行程讀不到 API key。"""
+        import os
         import subprocess
 
+        os.environ.pop("MINIBOT_TEST_PROVIDER_KEY", None)
         make_provider(api_key="SECRET-KEY-VALUE")
         result = subprocess.run(
             ["python", "-c", "import os; print(os.environ.get('MINIBOT_TEST_PROVIDER_KEY', ''))"],
             capture_output=True, text=True,
         )
-        assert result.stdout.strip() == "SECRET-KEY-VALUE"
+        assert result.stdout.strip() == ""
+
+    def test_credentials_still_reach_litellm(self, make_provider):
+        """修正後憑證仍須正確傳給 LiteLLM。"""
+        import litellm
+
+        captured = {}
+
+        async def fake_acompletion(**kwargs):
+            captured.update(kwargs)
+            return _FakeResponse(_FakeMessage(content="ok"))
+
+        original = litellm.acompletion
+        litellm.acompletion = fake_acompletion
+        try:
+            provider = make_provider(
+                api_key="k", api_base="https://api.minimax.io/v1"
+            )
+            asyncio.run(provider.chat(messages=[]))
+        finally:
+            litellm.acompletion = original
+
+        assert captured["api_key"] == "k"
+        assert captured["api_base"] == "https://api.minimax.io/v1"
