@@ -136,6 +136,8 @@
 
 - **測試：設定加密路徑**：`tests/test_loader.py` 新增 `TestEncryptionKeyHandling`、`TestValueEncryption`、`TestSensitiveFieldEncryption`、`TestSaveAndLoadRoundTrip`（27 個測試）。這些是「預設環境永遠跑不到」的分支（需設定 `MINIBOT_CONFIG_KEY`），正是 #1 指出缺陷集中之處——**上面的明文落盤缺陷即由此組測試發現**。端到端往返測試斷言的是使用者可見性質（存檔後磁碟上沒有明文、載入後還原明文），而非「函式被呼叫過」。另 `tests/conftest.py` 的環境隔離加入 `MINIBOT_CONFIG_KEY`。`config/loader.py` 覆蓋率 63% → 100%。
 
+- **測試：記憶體與工具註冊表**：新增 `tests/test_memory.py`（11 個）與 `tests/test_tool_registry.py`（8 個）。涵蓋 `MEMORY.md`／`HISTORY.md` 的讀寫與 append-only 語意、HISTORY 不注入 prompt，以及工具註冊、未知工具回報與**工具例外轉為可讀訊息且不外洩內部細節**。`agent/memory.py` 與 `agent/tools/registry.py` 覆蓋率均達 100%，整體 89% → 93%。（測試數 326 → 366）
+
 - **測試：Telegram channel**：新增 `tests/test_telegram_channel.py`（19 個測試）。涵蓋 session key 格式（`tg:user_{id}`，鎖定 #2 的驗收標準）、`_handle_message` 改為發布 inbound 且不再直接回覆、回覆對象 `chat_id` 的記錄與回退、`/start` 歡迎訊息、回覆分段（4096 上限）與分段內容重組、單則送出失敗不中斷派送迴圈、背景 task 的啟動與關閉（以 `asyncio.wait_for` 逾時保護，避免關閉死鎖悄悄回歸）、以及**經由 bus 的端到端流程**與**併發訊息被序列化**（斷言落盤順序為 `user/assistant` 成對）。`channels/telegram.py` 覆蓋率 0% → 90%，整體 85% → 89%。（測試數 306 → 326）
 
 - **測試：注入防護**：`tests/test_context.py` 新增 `TestChineseAndEncodingVariants`（中文樣式、`disregard` 同義改寫、零寬切斷、全形同形字、全形冒號角色冒充、不可見字元移除，以及「正常中文不被誤傷」的回歸案例）、`TestToolOutputWrapping`（邊界包裝、`</tool_output>` 無法被提前關閉、system prompt 政策宣告）、`TestSanitizeLogging`（命中時記錄、正常輸入不記錄、日誌不含原始內容）。另 `tests/test_agent_loop.py` 的工具輸出斷言改為先解開邊界再比對，鎖定「輸出必經邊界標記」。`agent/context.py` 覆蓋率 0% → 100%。（測試數 284 → 306）
