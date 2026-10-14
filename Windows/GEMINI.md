@@ -58,10 +58,11 @@ return cmd_parts
 
 ## 5. 驗證方式
 
-測試在本機執行：`python -m pytest tests/ --cov=minibot --cov-report=term-missing`。
+**本專案不使用遠端 CI**，測試一律在本機執行：
+`python -m pytest tests/ --cov=minibot --cov-report=term-missing`。
+不要新增 CI workflow（維護者的明確決定）。
 
 Windows 路徑的真實驗證靠 `TestShellWindowsEndToEnd`（實際跑 `pwsh`，比對 stdout）。
-GitHub Actions 已移除，因此**這個測試目前沒有自動化 runner**：在非 Windows 平台
-一律 skip。要驗證 Windows 路徑，必須在一台裝有 PowerShell 7 的 Windows 機器上直接
-執行測試；否則只能依賴以 monkeypatch 模擬的單元測試。見
-[#23](https://github.com/chiisen/mini_bot/issues/23)。
+它只在 Windows 上跑，因此在非 Windows 平台一律 skip——要驗證 Windows 路徑，必須在
+一台裝有 PowerShell 7 的 Windows 機器上直接執行測試；否則只能依賴以 monkeypatch
+模擬的單元測試。此缺口見 [#23](https://github.com/chiisen/mini_bot/issues/23)。
