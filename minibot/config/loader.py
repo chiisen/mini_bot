@@ -1,11 +1,12 @@
 """Config loading with encryption support."""
 
+import copy
 import json
 import os
 import base64
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
 from minibot.config.schema import Config
@@ -13,6 +14,18 @@ from minibot.i18n import t as _t
 
 _fernet: Fernet | None = None
 _encryption_key_env = "MINIBOT_CONFIG_KEY"
+
+PROVIDER_NAMES = ("minimax", "openrouter", "anthropic", "openai", "deepseek", "gemini")
+
+# 敏感欄位在設定結構中的實際路徑。
+#
+# 注意 provider 金鑰位於 `providers.<name>.apiKey`，**不是最上層的 <name>.apiKey**。
+# 這裡過去寫成後者，導致 provider 金鑰從未被加解密、以明文落盤；而 telegram
+# token 因為路徑剛好寫對而正常運作。同一份邏輯原本寫了兩遍（加密、解密各一遍），
+# 因此只錯在其中一遍——收斂成單一表格可避免再次漂移。
+SENSITIVE_FIELDS: tuple[tuple[str, ...], ...] = tuple(
+    ("providers", name, "apiKey") for name in PROVIDER_NAMES
+) + (("channels", "telegram", "botToken"),)
 
 
 class ConfigError(Exception):
@@ -50,41 +63,42 @@ def _decrypt_value(value: str) -> str:
     try:
         return fernet.decrypt(value.encode()).decode()
     except Exception:
+        # 金鑰變更、內容損壞、或本來就是明文（舊版寫入的設定檔）時原樣保留，
+        # 不讓載入失敗——否則使用者會因為換金鑰而完全無法啟動。
         return value
+
+
+def _map_sensitive_fields(
+    data: dict[str, Any], transform: Callable[[str], str]
+) -> dict[str, Any]:
+    """依 `SENSITIVE_FIELDS` 轉換敏感欄位。
+
+    對輸入做深拷貝後才操作：`data` 通常是 `model_dump()` 的結果，但淺拷貝會讓
+    巢狀的 provider／channels 子 dict 與輸入共用，導致呼叫端的物件被就地改動。
+    """
+    result = copy.deepcopy(data)
+
+    for path in SENSITIVE_FIELDS:
+        parent: Any = result
+        for key in path[:-1]:
+            if not isinstance(parent, dict):
+                parent = None
+                break
+            parent = parent.get(key)
+        if isinstance(parent, dict) and parent.get(path[-1]):
+            parent[path[-1]] = transform(parent[path[-1]])
+
+    return result
 
 
 def _encrypt_sensitive_fields(data: dict[str, Any]) -> dict[str, Any]:
     """加密敏感欄位。"""
-    result = data.copy()
-
-    for provider in ["minimax", "openrouter", "anthropic", "openai", "deepseek", "gemini"]:
-        if provider in result and isinstance(result[provider], dict):
-            if "apiKey" in result[provider] and result[provider]["apiKey"]:
-                result[provider]["apiKey"] = _encrypt_value(result[provider]["apiKey"])
-
-    if "channels" in result and isinstance(result.get("channels"), dict):
-        telegram = result.get("channels", {}).get("telegram", {})
-        if "botToken" in telegram and telegram["botToken"]:
-            telegram["botToken"] = _encrypt_value(telegram["botToken"])
-
-    return result
+    return _map_sensitive_fields(data, _encrypt_value)
 
 
 def _decrypt_sensitive_fields(data: dict[str, Any]) -> dict[str, Any]:
     """解密敏感欄位。"""
-    result = data.copy()
-
-    for provider in ["minimax", "openrouter", "anthropic", "openai", "deepseek", "gemini"]:
-        if provider in result and isinstance(result[provider], dict):
-            if "apiKey" in result[provider] and result[provider]["apiKey"]:
-                result[provider]["apiKey"] = _decrypt_value(result[provider]["apiKey"])
-
-    if "channels" in result and isinstance(result.get("channels"), dict):
-        telegram = result.get("channels", {}).get("telegram", {})
-        if "botToken" in telegram and telegram["botToken"]:
-            telegram["botToken"] = _decrypt_value(telegram["botToken"])
-
-    return result
+    return _map_sensitive_fields(data, _decrypt_value)
 
 
 def get_config_path() -> Path:

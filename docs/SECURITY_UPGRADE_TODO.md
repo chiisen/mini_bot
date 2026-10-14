@@ -80,12 +80,30 @@ result = await tool.execute("~/.ssh/id_rsa")  # 應回傳錯誤
 - [x] 在 config 加載時使用 pydantic validator 驗證
 - [x] 從環境變數讀取敏感資訊時提供提示
 
+> **勘誤（2026-10-14）**：上面「實作 config 加密機制」的勾選**曾經過早**。
+> 加密程式碼確實存在，但 `_encrypt_sensitive_fields()` /
+> `_decrypt_sensitive_fields()` 在**最上層**尋找 `<provider>.apiKey`，
+> 而 provider 金鑰實際位於 `providers.<provider>.apiKey`。因此 provider 金鑰
+> **從未真正加密**，`save_config()` 一律以明文寫入磁碟；只有 telegram
+> `botToken` 因為路徑剛好寫對而正常運作——這也讓缺陷更難察覺。
+> 已於 #1 的補測試過程中發現並修正。
+>
+> 教訓：加密「有實作」不等於「有效」。這類缺陷只能靠端到端往返測試揭露
+> （save → 檢查磁碟上沒有明文 → load 還原明文），而非斷言函式被呼叫過。
+
 **驗證方法**：
 ```bash
 # 優先使用環境變數
 export MINIMAX_API_KEY="your-key-here"
 export TELEGRAM_BOT_TOKEN="your-token-here"
 minibot agent
+```
+
+設定 `MINIBOT_CONFIG_KEY` 後，磁碟上的 `config.json` 不應出現明文密鑰：
+
+```bash
+export MINIBOT_CONFIG_KEY="your-passphrase"
+grep -c "sk-" ~/.minibot/config.json   # 預期 0
 ```
 
 ---

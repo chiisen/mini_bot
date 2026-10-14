@@ -6,6 +6,17 @@
 
 ### 修正
 
+- **API Key 以明文寫入 `config.json`**：`loader.py` 的 `_encrypt_sensitive_fields()` / `_decrypt_sensitive_fields()` 在**最上層**尋找 `<provider>.apiKey`，但 provider 金鑰實際位於 `providers.<provider>.apiKey`。因此設定 `MINIBOT_CONFIG_KEY` 後，**provider 金鑰從未真正加密**，`save_config()` 一律以明文落盤；只有 telegram `botToken` 因為路徑剛好寫對而正常，讓缺陷更難察覺。實測（設定金鑰後存檔）：
+
+  ```
+  provider 金鑰以明文落盤 : True
+  telegram token 明文落盤 : False
+  ```
+
+  這使得 `docs/SECURITY_UPGRADE_TODO.md` T3「實作 config 加密機制」的勾選形同虛設。(Why: 明文 API Key 落在 `~/.minibot/config.json`，任何能讀該檔的行程或備份都能取得金鑰；而文件宣稱已加密，使用者不會預期需要保護此檔)
+
+  修正方式：把重複兩遍（加密、解密各一遍，只錯在其中一遍）的欄位走訪收斂為單一 `SENSITIVE_FIELDS` 路徑表，兩者共用同一份 `_map_sensitive_fields()`，避免再次漂移。同時改為深拷貝後才操作——原本的淺拷貝會讓巢狀子 dict 與輸入共用，使呼叫端的物件被就地改動。（明文設定檔仍可正常載入：`_decrypt_value()` 遇到非密文時原樣保留，不因換金鑰而無法啟動）
+
 - **Telegram 併發訊息會永久損壞對話歷史**：`channels/telegram.py` 的 handler 直接 `await agent_loop.process_direct()`，而 python-telegram-bot **預設併發處理更新**（`concurrent_updates=256`）。同一使用者的相鄰訊息因此併發進入同一個 session，實測落盤順序變成：
 
   ```
@@ -93,6 +104,8 @@
 
 ### 修改
 
+- **`docs/SECURITY_UPGRADE_TODO.md` T3 勘誤**：記錄 provider 金鑰加密從未生效的經過，並補上可複驗的驗證指令（`grep -c "sk-" ~/.minibot/config.json` 應為 0）。同時記下教訓：加密「有實作」不等於「有效」，只有端到端往返測試能揭露。
+
 - **Telegram channel 改走 MessageBus**：`_handle_message()` 不再直接呼叫 Agent，改為 `publish_inbound()` 發布 `InboundMessage`；`AgentLoop.run()` 與 outbound 派送器則作為背景 task 執行（收訊 → bus → Agent → bus → 送回 Telegram）。頻道因此只需實作「收訊 → publish_inbound」與「收 outbound → 送出」兩件事，與 Agent 解耦。(Fixes #2)
 
   - **Session key 維持不變**：`InboundMessage.session_key` 為 `channel:chat_id`，故 `chat_id` 採 `user_{id}`，使 session key 仍是 `tg:user_{user_id}`，既有 session 檔完全相容。實際回覆對象另存於 `metadata["reply_chat_id"]`，並由 `AgentLoop.run()` 原樣帶回——這正是前述「併發損壞歷史」的修正。
@@ -120,6 +133,8 @@
 - **README Windows 支援**：新增 Windows 環境準備說明（PowerShell 7）、Windows 安裝指令（PowerShell 指令），並更新功能總覽表格（移除已實現的 Shell 工具）。(Why: 完善跨平台文件)
 
 ### 新增
+
+- **測試：設定加密路徑**：`tests/test_loader.py` 新增 `TestEncryptionKeyHandling`、`TestValueEncryption`、`TestSensitiveFieldEncryption`、`TestSaveAndLoadRoundTrip`（27 個測試）。這些是「預設環境永遠跑不到」的分支（需設定 `MINIBOT_CONFIG_KEY`），正是 #1 指出缺陷集中之處——**上面的明文落盤缺陷即由此組測試發現**。端到端往返測試斷言的是使用者可見性質（存檔後磁碟上沒有明文、載入後還原明文），而非「函式被呼叫過」。另 `tests/conftest.py` 的環境隔離加入 `MINIBOT_CONFIG_KEY`。`config/loader.py` 覆蓋率 63% → 100%。
 
 - **測試：Telegram channel**：新增 `tests/test_telegram_channel.py`（19 個測試）。涵蓋 session key 格式（`tg:user_{id}`，鎖定 #2 的驗收標準）、`_handle_message` 改為發布 inbound 且不再直接回覆、回覆對象 `chat_id` 的記錄與回退、`/start` 歡迎訊息、回覆分段（4096 上限）與分段內容重組、單則送出失敗不中斷派送迴圈、背景 task 的啟動與關閉（以 `asyncio.wait_for` 逾時保護，避免關閉死鎖悄悄回歸）、以及**經由 bus 的端到端流程**與**併發訊息被序列化**（斷言落盤順序為 `user/assistant` 成對）。`channels/telegram.py` 覆蓋率 0% → 90%，整體 85% → 89%。（測試數 306 → 326）
 
