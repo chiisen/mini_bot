@@ -114,11 +114,18 @@ class AgentLoop:
         session = self.session_mgr.get_or_create(session_key)
         history = session.get_history(self.memory_window)
 
+        # 送進 LLM 的當輪內容由 build_messages 過濾；落盤使用同一個結果，
+        # 否則被 [FILTERED] 的注入字串會以原始形式存入歷史，從下一輪起就
+        # 繞過 sanitize_input()（過濾只在「當輪」有效）。build_messages 一律
+        # 把當輪訊息接在最後，故直接取末項即可，不必重複過濾一次。
         messages = self.context.build_messages(history, content)
-        session.add_message("user", content)
+        safe_content = messages[-1]["content"]
 
         final_content, tools = await self._run_agent_loop(messages, on_progress)
 
+        # 只在成功時落盤完整的一輪。失敗時若已寫入 user 訊息，歷史會變成
+        # `user, user`（記憶體中已寫入、未落盤），送進 LLM 是不合法的結構。
+        session.add_message("user", safe_content)
         session.add_message("assistant", final_content)
         self.session_mgr.save(session)
 
@@ -146,12 +153,17 @@ class AgentLoop:
                 result = t("error.llm_request_failed")
 
             # metadata 一併回傳：頻道用它記路由資訊（例如實際回覆對象）
-            await self.bus.publish_outbound(OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=result,
-                metadata=msg.metadata,
-            ))
+            try:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=result,
+                    metadata=msg.metadata,
+                ))
+            except Exception as e:
+                # 單一則發佈失敗不該殺掉整個消費迴圈——否則該 bot 對所有
+                # 使用者靜默停止處理（見 channels/telegram.py 的 done callback）。
+                logger.error("Failed to publish outbound for {}: {}", msg.session_key, e)
 
     def stop(self):
         """停止 Bus 消費迴圈。"""
