@@ -108,6 +108,24 @@
 - **測試覆蓋**：`tests/test_config.py` 新增 `TestEnvOverrides`，涵蓋環境變數存在/不存在、以及環境變數覆蓋 config 檔值的雙路徑。（測試數 12 → 19）
 - **測試**：`tests/test_litellm_provider.py` 的 `TestGlobalSideEffect` 原本固化缺陷行為（「環境變數寫入的後果——已記錄但尚未修正」），改為 `TestNoEnvPollution`，斷言翻轉為「建構 provider 不寫入任何環境變數」；另新增 `test_credentials_still_reach_litellm`，確保移除環境變數寫入後憑證仍正確傳給 LiteLLM。（測試數 23 → 23，覆蓋率維持 100%）
 
+- **模型回空時使用者完全收不到任何訊息**：`AgentLoop._run_agent_loop()` 在無 tool call 時直接回傳 `resp.content or ""`，而空字串會讓頻道**什麼都不送**——`split_for_telegram("")` 是空清單，`_deliver_outbound()` 只留下一行警告就 `continue`。使用者因此只看到自己送出的訊息、之後全無回應，合理反應是重送同一則，形成「送出 → 毫無反應 → 重送」的迴圈。實測（provider 固定回傳 `content=None`，走 bus 路徑）：
+
+  ```
+  outbound.content : ''
+  Telegram 實送則數 : 0
+  ```
+
+  改為在無 tool call 且內容為空時回覆 `error.empty_reply`，與 provider 端例外時回覆 `error.llm_request_failed` 的處置一致。**純空白同樣算空回覆**——送一串空白對使用者等於沒有回覆。修正後同一情境：
+
+  ```
+  outbound.content : 'Sorry, I didn't produce a reply this time. Please send your message again.'
+  Telegram 實送則數 : 1
+  ```
+
+  這個位置同時修掉一個較不明顯的後果：空字串原本會被寫進 session，讓下一輪的 LLM 歷史帶著一個沒有內容的 assistant 回合。現在落盤的是使用者實際看到的那句話。`tests/test_agent_loop.py` 的 `test_empty_content_becomes_empty_string` 原本把這個缺陷**當成規格固定下來**（斷言 `== ""`），已改為斷言「必須回一則看得見的訊息」，並新增走 bus 路徑的端到端測試——驗的是 `split_for_telegram()` 還會不會產生 0 段（實際送出則數），而不是「有沒有回退字串」。(Fixes #22)
+
+- **i18n 三語系缺鍵沒有任何檢查**：`t()` 找不到鍵時會**原樣回傳鍵名**，因此只把新字串加進 `en.json` 會讓 zh_TW / zh_CN 使用者在對話中看到 `error.empty_reply` 這串識別字，而**沒有任何測試會失敗**。`tests/test_i18n.py` 新增 `TestLocaleFileParity`，斷言三個語系檔的鍵集合完全一致且無空白翻譯（測試數 404 → 412）。
+
 #### 同一批次改動的獨立安全審查後續修正
 
 以下六項是在上述改動完成後，以獨立 verifier 針對同一批提交做安全審查所發現的問題。它們分屬兩種性質：**本次改動新引進的暴露面**（前兩項，修正前不可觸及），以及**審查同時揭露、範圍內該一併修掉的既有缺陷**。

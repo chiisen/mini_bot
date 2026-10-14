@@ -73,7 +73,18 @@ class AgentLoop:
 
             # 無 tool calls → 回傳最終內容
             if not resp.has_tool_calls:
-                return resp.content or "", tools_used
+                content = resp.content or ""
+                # 純空白也視為空回覆：送一串空白對使用者等於沒有回覆。
+                if not content.strip():
+                    # 回傳空字串會讓頻道「什麼都不送」——`split_for_telegram("")`
+                    # 是空清單，使用者只看到自己送出的訊息、之後全無回應，然後
+                    # 重送同一則（#22）。改回一句看得見的訊息，與 provider 端
+                    # 例外時回 `error.llm_request_failed` 的處置一致。
+                    logger.warning(
+                        "LLM returned empty content with no tool calls; replying with fallback"
+                    )
+                    return t("error.empty_reply"), tools_used
+                return content, tools_used
 
             # 有 tool calls → 加入 assistant 訊息並依序執行
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": resp.content or ""}

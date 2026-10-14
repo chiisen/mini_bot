@@ -16,6 +16,7 @@ import pytest
 
 from minibot.agent.loop import AgentLoop
 from minibot.bus.queue import MessageBus
+from minibot.i18n import t
 from minibot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
@@ -67,9 +68,49 @@ class TestNoToolCalls:
         assert asyncio.run(make_loop(provider, workspace).process_direct("嗨")) == "你好"
         assert len(provider.calls) == 1
 
-    def test_empty_content_becomes_empty_string(self, workspace):
-        provider = ScriptedProvider([LLMResponse(content=None)])
-        assert asyncio.run(make_loop(provider, workspace).process_direct("嗨")) == ""
+    @pytest.mark.parametrize("empty", [None, "", "   ", "\n\t "])
+    def test_empty_reply_is_substituted_with_a_visible_message(self, workspace, empty):
+        """模型沒給內容時，必須回一則使用者看得見的訊息。
+
+        回歸測試（#22）：`_run_agent_loop()` 原本回傳 `resp.content or ""`，
+        空字串會讓頻道送出 **0 則**（`split_for_telegram("") == []`），使用者
+        只看到自己送出的訊息、之後全無回應，於是重送同一則。純空白同樣算空
+        回覆——送一串空白對使用者等於沒有回覆。
+        """
+        provider = ScriptedProvider([LLMResponse(content=empty)])
+        result = asyncio.run(make_loop(provider, workspace).process_direct("嗨"))
+
+        assert result.strip(), "不可回傳空字串或純空白"
+        assert result == t("error.empty_reply")
+
+    def test_normal_reply_is_not_altered(self, workspace):
+        """非空回覆必須原樣通過，不被 trim、也不被改寫。"""
+        provider = ScriptedProvider([LLMResponse(content="  保留空白  ")])
+        assert asyncio.run(make_loop(provider, workspace).process_direct("嗨")) == "  保留空白  "
+
+    def test_empty_reply_is_not_persisted_as_blank(self, workspace):
+        """落盤的 assistant 訊息不可為空。
+
+        空字串會被 `get_history()` 帶進下一輪的 LLM 歷史，變成一個沒有內容的
+        assistant 回合——那既是無效的上文，也可能被部分 provider 拒收。
+        """
+        provider = ScriptedProvider([
+            LLMResponse(content=None),
+            LLMResponse(content="正常回覆"),
+        ])
+        loop = make_loop(provider, workspace)
+
+        asyncio.run(loop.process_direct("問題"))
+        asyncio.run(loop.process_direct("下一題"))
+
+        raw = (workspace / "sessions" / "cli_direct.jsonl").read_text(encoding="utf-8")
+        entries = [
+            json.loads(line) for line in raw.splitlines()
+            if line.strip() and json.loads(line).get("_type") != "metadata"
+        ]
+        assistant = [e for e in entries if e["role"] == "assistant"]
+        assert len(assistant) == 2
+        assert all(e["content"].strip() for e in assistant)
 
     def test_persists_session_to_disk(self, workspace):
         provider = ScriptedProvider([LLMResponse(content="回覆")])
@@ -350,6 +391,24 @@ class TestBusRunLoop:
         assert "error" in failed.content.lower()
         # 且迴圈必須繼續，下一則仍能正常處理
         assert recovered.content == "恢復後回覆"
+
+    def test_empty_reply_still_reaches_the_user(self, workspace):
+        """端到端：模型回空時，使用者必須收到一則真的送得出去的訊息。
+
+        這是 #22 的使用者可見症狀——要驗的不是「有沒有回退字串」，而是
+        `split_for_telegram()` 是否還會產生 0 段（等於實際送出 0 則）。
+        """
+        from minibot.bus.events import InboundMessage
+        from minibot.channels.telegram import split_for_telegram
+
+        loop = make_loop(ScriptedProvider([LLMResponse(content=None)]), workspace)
+        outbound = self._run_until_outbound(
+            loop,
+            InboundMessage(channel="tg", sender_id="1", chat_id="user_1", content="問題"),
+        )
+
+        assert outbound.content.strip(), "回覆不可為空或純空白"
+        assert split_for_telegram(outbound.content), "空回覆會讓 Telegram 實際送出 0 則"
 
     def test_outbound_carries_routing_metadata(self, workspace):
         """頻道靠 metadata 決定回覆對象，故 run() 必須原樣帶回。"""
