@@ -371,6 +371,17 @@ class TestShellWindowsBranch:
         with patch.object(filesystem_module, "_is_windows", return_value=True):
             yield
 
+    @pytest.fixture
+    def unix(self):
+        """強制非 Windows 分支。
+
+        必須顯式覆寫而非依賴執行平台——否則這個測試在 Windows 上會落到
+        真實的 `_is_windows()`（回傳 True）而失敗，正是 CI 加入
+        windows-latest 後才曝光的問題。
+        """
+        with patch.object(filesystem_module, "_is_windows", return_value=False):
+            yield
+
     def test_routes_through_powershell_7(self, windows):
         """Windows 上一律用 pwsh 執行，且不載入 profile。"""
         argv = ShellTool()._build_argv("ls -la /tmp")
@@ -382,7 +393,7 @@ class TestShellWindowsBranch:
             "ls -la /tmp",
         ]
 
-    def test_unix_does_not_use_powershell(self):
+    def test_unix_does_not_use_powershell(self, unix):
         argv = ShellTool()._build_argv("ls -la /tmp")
         assert argv == ["ls", "-la", "/tmp"]
 

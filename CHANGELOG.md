@@ -85,7 +85,7 @@
 
 ### 新增
 
-- **測試：ShellTool Windows 分支**：`tests/test_tools_filesystem.py` 新增 `TestShellWindowsBranch`（6 項，以 monkeypatch `_is_windows` 驗證 argv 組裝為 `pwsh -NoProfile -NonInteractive -Command <原文>`、指令原文完整傳遞、`pwsh` 缺失時的錯誤訊息、Windows stdout 路徑）、`TestShellFailureVisibility`（5 項，鎖定失敗時 stderr 優先）、反斜線黑名單繞過回歸測試，以及 `test_never_calls_plumbum`（鎖定不再回頭使用 plumbum）。另新增 `TestShellWindowsEndToEnd`（3 項，僅在 Windows runner 執行，做真實端到端驗證）。(Why: 修正的是「只在 Windows 失效且被 `except Exception` 吞掉」的路徑，若只用 mock 驗證容易再次漏掉真實環境差異，故同時保留單元與端到端兩層)（測試數 284 passed / 3 skipped；`filesystem.py` 覆蓋率 88% → 95%）
+- **測試：ShellTool Windows 分支**：`tests/test_tools_filesystem.py` 新增 `TestShellWindowsBranch`（6 項，以 monkeypatch `_is_windows` 驗證 argv 組裝為 `pwsh -NoProfile -NonInteractive -Command <原文>`、指令原文完整傳遞、`pwsh` 缺失時的錯誤訊息、Windows stdout 路徑）、`TestShellFailureVisibility`（5 項，鎖定失敗時 stderr 優先）、反斜線黑名單繞過回歸測試，以及 `test_never_calls_plumbum`（鎖定不再回頭使用 plumbum）。另新增 `TestShellWindowsEndToEnd`（3 項，僅在 Windows runner 執行，做真實端到端驗證）。(Why: 修正的是「只在 Windows 失效且被 `except Exception` 吞掉」的路徑，若只用 mock 驗證容易再次漏掉真實環境差異，故同時保留單元與端到端兩層)（macOS：284 passed / 3 skipped；Windows：286 passed / 1 skipped；`filesystem.py` 覆蓋率 88% → 95%）
 
 - **測試：CLI 指令**：新增 `tests/test_cli_commands.py`（23 個測試），以 `typer.testing.CliRunner` 驗證 `onboard`（建立設定／workspace、冪等、不覆寫既有檔案）、`status` 與 `config-show`（含 API Key 遮罩）、設定損壞時明確報錯且 exit 1、`onboard` 在設定損壞時仍可執行、`agent`／`telegram` 在設定不足時正確拒絕，以及 `_make_provider()` 的 provider 優先序與 fallback。`cli/commands.py` 覆蓋率 0% → 70%，整體 70% → 84%。（測試數 231 → 254）(Why: CLI 是使用者唯一的操作介面，且是設定載入錯誤的呈現層；測試以 `isolated_home` fixture 隔離 HOME，避免讀寫真實設定)
 
