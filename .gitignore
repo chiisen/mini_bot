@@ -58,3 +58,10 @@ workspace/memory/HISTORY.md
 logs/
 .grepai/
 .aider*
+
+# opencode 產生的本機檔案
+# .opencode/.gitignore 會把自己也列為忽略項目而無法進版控，故在此統一宣告
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+.opencode/bun.lock
