@@ -202,6 +202,10 @@
 
 ### 修改
 
+- **移除 `.coderabbit.yaml`**：該設定只提供 PR 審查指令，但本專案已決定不走 PR、直接在 `main` 開發，因此它不會再被觸發。(Why: 留著會讓後人誤以為 PR 流程仍在運作)
+
+- **移除死碼 `get_data_path()`**：`cli/commands.py` 從 `utils/helpers.py` 匯入它卻從未呼叫，而函式本身在整個程式碼庫（含測試）也沒有任何呼叫點——唯一提及它的是 `docs/MINIBOT_MINIMAL_VERSION.md`，那是獨立的「復刻指南」程式碼展示，不是 live API。一併移除未使用的 import。(Why: 未被呼叫的公開函式會被誤認為可用介面，且在覆蓋率報表中表現為「無法解釋的未覆蓋行」)
+
 - **移除 GitHub Actions CI**：`.github/workflows/ci.yml` 刪除，測試改由本機執行（`python -m pytest tests/ --cov=minibot`）。(Why: 由維護者決定，以本機 AI coding 流程取代遠端 CI)
 
   **這是常態決定，不是暫時狀態**：已寫入 `GEMINI.md` §3.6 與 `Windows/GEMINI.md` §5（含「不要新增 CI workflow」），避免日後又被加回來。
@@ -237,6 +241,8 @@
 - **README Windows 支援**：新增 Windows 環境準備說明（PowerShell 7）、Windows 安裝指令（PowerShell 指令），並更新功能總覽表格（移除已實現的 Shell 工具）。(Why: 完善跨平台文件)
 
 ### 新增
+
+- **測試：i18n 防禦分支**：`tests/test_i18n.py` 新增 `TestTranslationLookup`（4 個測試），涵蓋 `set_locale()` 拒絕不支援語系、`t()` 的惰性載入、`kwargs` 對不上佔位符時的 `KeyError` 吞除、以及未知鍵原樣回傳。這幾個分支在正常呼叫下走不到，但正是它們決定「輸入不合法時會怎樣」——沒有測試就等於把出錯行為交給想像。`i18n/__init__.py` 覆蓋率 91% → 100%，`utils/helpers.py` 92% → 100%，整體 93% → 94%。（測試數 412 → 416）
 
 - **測試：設定加密路徑**：`tests/test_loader.py` 新增 `TestEncryptionKeyHandling`、`TestValueEncryption`、`TestSensitiveFieldEncryption`、`TestSaveAndLoadRoundTrip`（27 個測試）。這些是「預設環境永遠跑不到」的分支（需設定 `MINIBOT_CONFIG_KEY`），正是 #1 指出缺陷集中之處——**上面的明文落盤缺陷即由此組測試發現**。端到端往返測試斷言的是使用者可見性質（存檔後磁碟上沒有明文、載入後還原明文），而非「函式被呼叫過」。另 `tests/conftest.py` 的環境隔離加入 `MINIBOT_CONFIG_KEY`。`config/loader.py` 覆蓋率 63% → 100%。
 

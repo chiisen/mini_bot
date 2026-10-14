@@ -1,7 +1,0 @@
-# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
-language: "en-US" # 由於 zh-TW 不支援，使用英文作為基礎語言，透過 path_instructions 指定繁體中文
-reviews:
-  # 在此輸入您的自訂指令
-  path_instructions:
-    - path: "**/*"
-      instructions: "請使用繁體中文進行代碼審查，解釋要點並給予專業建議。"

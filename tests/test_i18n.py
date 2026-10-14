@@ -5,7 +5,15 @@ from pathlib import Path
 import pytest
 
 from minibot.config.schema import Config
-from minibot.i18n import SUPPORTED_LOCALES, detect_locale, get_locale, init, set_locale
+from minibot.i18n import (
+    DEFAULT_LOCALE,
+    SUPPORTED_LOCALES,
+    detect_locale,
+    get_locale,
+    init,
+    set_locale,
+    t,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -100,3 +108,38 @@ class TestLocaleFileParity:
         for locale in SUPPORTED_LOCALES:
             blanks = sorted(k for k, v in self._load(locale).items() if not str(v).strip())
             assert not blanks, f"{locale} 有空翻譯：{blanks}"
+
+
+class TestTranslationLookup:
+    """`t()` 與 `set_locale()` 的防禦分支。
+
+    這些分支在正常呼叫下走不到，但正是它們決定「輸入不合法時會怎樣」——
+    沒有測試就等於把出錯時的行為交給想像。
+    """
+
+    def test_set_locale_rejects_unsupported(self):
+        """不支援的語系必須被拒絕，且不得改變目前語系。"""
+        before = get_locale()
+        assert set_locale("fr") == DEFAULT_LOCALE
+        assert get_locale() == before
+
+    def test_t_loads_translations_lazily(self, monkeypatch):
+        """第一次呼叫 `t()` 時才載入語系檔（模組載入不讀檔）。"""
+        import minibot.i18n as i18n
+
+        monkeypatch.setattr(i18n, "_translations", {})
+        assert t("cli.agent.goodbye") != "cli.agent.goodbye", "應已觸發載入"
+
+    def test_t_keeps_template_when_placeholder_is_missing(self):
+        """`kwargs` 對不上佔位符時不得拋例外，原樣回傳模板。
+
+        `t()` 只攔 `KeyError`。少了這道保護，呼叫端多傳或少傳一個參數就會
+        讓整個指令崩潰——而不是顯示一句少了內插值的訊息。
+        """
+        # 該鍵在三個語系的字面值相同，故斷言與當前語系無關
+        assert t("cli.agent.welcome", bogus="x") == "🤖 minibot v{version}"
+        assert t("cli.agent.welcome") == "🤖 minibot v{version}"
+
+    def test_unknown_key_returns_the_key_itself(self):
+        """未知鍵原樣回傳鍵名——這正是 TestLocaleFileParity 存在的理由。"""
+        assert t("no.such.key.exists") == "no.such.key.exists"

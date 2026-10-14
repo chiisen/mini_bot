@@ -22,7 +22,7 @@ from minibot.config.schema import Config
 from minibot.i18n import init as i18n_init, t
 from minibot.providers.litellm_provider import LiteLLMProvider
 from minibot.session.manager import SessionManager
-from minibot.utils.helpers import ensure_dir, get_data_path
+from minibot.utils.helpers import ensure_dir
 
 app = typer.Typer(help="minibot - Personal AI Assistant (powered by mini_bot)")
 console = Console()

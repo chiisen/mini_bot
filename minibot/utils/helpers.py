@@ -17,11 +17,6 @@ def safe_filename(name: str) -> str:
     return name.strip()
 
 
-def get_data_path() -> Path:
-    """取得 minibot 資料根目錄（~/.minibot）。"""
-    return ensure_dir(Path.home() / ".minibot")
-
-
 def timestamp() -> str:
     """回傳目前時間的 ISO 格式字串。"""
     return datetime.now().isoformat()
