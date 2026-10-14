@@ -5,12 +5,16 @@
 - 敏感路徑（~/.ssh、/etc/passwd 等）必須被拒絕
 - shell 的串接與重導向字元必須被擋下
 - 非白名單指令、以及具副作用指令的未列舉子命令不得通過
+- Windows 一律經 PowerShell 7 執行，且失敗時要看得到 stderr
 """
 import asyncio
+import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from minibot.agent.tools import filesystem as filesystem_module
 from minibot.agent.tools.filesystem import (
     ListDirTool,
     ReadFileTool,
@@ -192,6 +196,30 @@ class TestShellCommandAllowlist:
         """
         assert ShellTool()._is_command_allowed(command) is False
 
+    @pytest.mark.parametrize("command", [
+        r"cat C:\Users\me\.ssh\id_rsa",
+        r"cat C:\Users\me\.aws\credentials",
+        r"cat C:\Users\me\.gnupg\secring.gpg",
+        r"cat C:\Users\me\.npm\_cacache\index-v5\x",
+        r"cat C:\Users\me\.composer\auth.json",
+    ])
+    def test_blacklist_applies_to_windows_backslash_paths(self, command):
+        """黑名單必須在 Windows 的反斜線路徑上同樣生效。
+
+        回歸測試：黑名單樣式以正斜線撰寫，而 Windows 的 `Path` 以反斜線呈現，
+        未統一斜線時 `C:\\Users\\me\\.ssh\\id_rsa` 可直接繞過檢查。ShellTool
+        沒有 workspace 邊界保護，繞過即等於可讀取私鑰。
+        """
+        assert ShellTool()._is_command_allowed(command) is False
+
+    def test_validate_path_blocks_windows_backslash_paths(self):
+        assert validate_path(r"C:\Users\me\.ssh\id_rsa") is None
+        assert validate_path(r"C:\Users\me\.aws\credentials") is None
+
+    def test_normal_shell_command_with_backslash_not_over_blocked(self):
+        """正規化不得誤傷一般指令。"""
+        assert ShellTool()._is_command_allowed("ls -la") is True
+
     @pytest.mark.parametrize("command", ["", "   ", "\t"])
     def test_rejects_empty_command(self, command):
         assert ShellTool()._is_command_allowed(command) is False
@@ -277,6 +305,10 @@ class TestShellExecutionEndToEnd:
         )
         assert result.strip() == "hi"
 
+    @pytest.mark.skipif(
+        filesystem_module._is_windows(),
+        reason="PowerShell 的 ls 沒有 -la 參數（-la 是 GNU ls 的旗標）",
+    )
     def test_ls_with_flags(self, workspace):
         """`ls -la` 先前會被 'Subcommand -la not allowed' 拒絕。"""
         result = asyncio.run(ShellTool().execute(command=f"ls -la {workspace}"))
@@ -291,3 +323,145 @@ class TestShellExecutionEndToEnd:
             ShellTool().execute(command="git " + "reset" + " --hard")
         )
         assert result.startswith("Error: Command not allowed")
+
+
+@pytest.mark.skipif(
+    not filesystem_module._is_windows(),
+    reason="僅在 Windows 上執行：驗證 pwsh 路徑的端到端輸出",
+)
+class TestShellWindowsEndToEnd:
+    """Windows 上透過 PowerShell 7 的實際執行（由 CI 的 windows-latest job 跑）。
+
+    #9 的核心驗收：白名單指令真的能執行並回傳 stdout。
+    """
+
+    def test_ls_returns_stdout(self, workspace):
+        result = asyncio.run(ShellTool().execute(command=f"ls {workspace}"))
+        assert "sub" in result
+
+    def test_cat_returns_file_content(self, workspace):
+        result = asyncio.run(
+            ShellTool().execute(command=f"cat {workspace / 'sub' / 'a.txt'}")
+        )
+        assert result.strip() == "hi"
+
+    def test_failure_shows_stderr_not_typeerror(self, workspace):
+        """#9 的症狀是固定回傳 'LocalMachine' TypeError；必須改為看得見錯誤。"""
+        result = asyncio.run(
+            ShellTool().execute(command="cat definitely-not-a-real-file-xyz")
+        )
+        assert "LocalMachine" not in result
+        assert result != ""
+
+
+class TestShellWindowsBranch:
+    """Windows 分支的 argv 組裝與錯誤處理。
+
+    真正的端到端執行由 CI 的 windows-latest job 負責（見 .github/workflows/ci.yml）。
+    這裡以 monkeypatch 覆寫 `_is_windows()`，在非 Windows 平台上驗證組裝邏輯。
+
+    回歸背景（#9）：此分支過去呼叫 `local(cmd, args, shell=False)`，而
+    `plumbum.local` 是 `LocalMachine` 實例、不可呼叫，對任何指令都固定拋
+    `TypeError: 'LocalMachine' object is not callable`，使 ShellTool 在
+    Windows 上完全不可用。
+    """
+
+    @pytest.fixture
+    def windows(self):
+        with patch.object(filesystem_module, "_is_windows", return_value=True):
+            yield
+
+    def test_routes_through_powershell_7(self, windows):
+        """Windows 上一律用 pwsh 執行，且不載入 profile。"""
+        argv = ShellTool()._build_argv("ls -la /tmp")
+        assert argv == [
+            "pwsh",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "ls -la /tmp",
+        ]
+
+    def test_unix_does_not_use_powershell(self):
+        argv = ShellTool()._build_argv("ls -la /tmp")
+        assert argv == ["ls", "-la", "/tmp"]
+
+    def test_empty_command_yields_no_argv(self):
+        assert ShellTool()._build_argv("") is None
+        assert ShellTool()._build_argv("   ") is None
+
+    def test_whole_command_is_passed_verbatim(self, windows):
+        """指令原文要完整交給 pwsh，不可被 split 後重組而破壞引號。"""
+        argv = ShellTool()._build_argv('cat "a b.txt"')
+        assert argv[-1] == 'cat "a b.txt"'
+
+    def test_missing_powershell_reports_clearly(self, windows, workspace):
+        """pwsh 不存在時要回報原因，而非一行 TypeError。"""
+        def raise_missing(*args, **kwargs):
+            raise FileNotFoundError(2, "No such file or directory", "pwsh")
+
+        with patch.object(subprocess, "run", raise_missing):
+            result = asyncio.run(ShellTool().execute(command="echo hi"))
+
+        assert result == "Error: Command not found: pwsh"
+        assert "LocalMachine" not in result
+
+    def test_windows_execution_returns_stdout(self, windows, workspace):
+        """以假的 subprocess 結果驗證 Windows 路徑的成功輸出。"""
+        fake = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="hello\n", stderr=""
+        )
+        with patch.object(subprocess, "run", return_value=fake):
+            result = asyncio.run(ShellTool().execute(command="echo hello"))
+
+        assert result == "hello"
+
+
+class TestShellFailureVisibility:
+    """命令失敗時必須看得到 stderr，而非被 stdout 蓋掉或只剩一行例外訊息。"""
+
+    def test_stderr_shown_on_nonzero_exit(self, workspace):
+        fake = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="cat: boom: no such file"
+        )
+        with patch.object(subprocess, "run", return_value=fake):
+            result = asyncio.run(ShellTool().execute(command="cat boom"))
+
+        assert result == "[Exit code: 1]\ncat: boom: no such file"
+
+    def test_stderr_wins_over_partial_stdout(self, workspace):
+        """命令先輸出一部分再失敗時，要看得到錯誤原因。"""
+        fake = subprocess.CompletedProcess(
+            args=[], returncode=2, stdout="partial output", stderr="fatal: nope"
+        )
+        with patch.object(subprocess, "run", return_value=fake):
+            result = asyncio.run(ShellTool().execute(command="git status"))
+
+        assert "fatal: nope" in result
+        assert "partial output" not in result
+
+    def test_timeout_reported(self, workspace):
+        def raise_timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="sleep", timeout=60)
+
+        with patch.object(subprocess, "run", raise_timeout):
+            result = asyncio.run(ShellTool().execute(command="echo hi"))
+
+        assert result == "Error: Command timed out after 60 seconds"
+
+    def test_no_output_placeholder(self, workspace):
+        fake = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        with patch.object(subprocess, "run", return_value=fake):
+            result = asyncio.run(ShellTool().execute(command="echo hi"))
+
+        assert result == "(no output)"
+
+    def test_never_calls_plumbum(self, workspace):
+        """#9 回歸鎖定：實作不得再依賴 plumbum。"""
+        import minibot.agent.tools.filesystem as mod
+
+        assert not hasattr(mod, "plumbum")
+        source = Path(mod.__file__).read_text(encoding="utf-8")
+        assert "plumbum" not in source

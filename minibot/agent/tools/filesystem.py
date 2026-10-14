@@ -1,5 +1,6 @@
 """File system tools."""
 
+import platform
 import subprocess
 from pathlib import Path
 from minibot.agent.tools.base import Tool
@@ -52,7 +53,31 @@ BLACKLISTED_PATTERNS = [
     "/.composer/",
 ]
 
+
+def _normalized(text: str) -> str:
+    """把反斜線統一為正斜線，讓黑名單在 Windows 路徑上同樣生效。
+
+    黑名單樣式一律以正斜線撰寫（`/.ssh/` 等）。Windows 的 `Path` 會以反斜線
+    呈現，若不統一，`C:\\Users\\me\\.ssh\\id_rsa` 這類路徑會直接繞過檢查。
+    """
+    return text.replace("\\", "/")
+
 MAX_FILE_SIZE = 5 * 1024 * 1024
+
+# Windows 上一律透過 PowerShell 7 執行：cmd.exe 與內建 PowerShell 5.1 有輸出
+# 緩衝問題，導致 subprocess 擷取不到輸出（GEMINI.md §3）。
+SHELL_TIMEOUT = 60
+WINDOWS_SHELL = "pwsh"
+
+
+def _is_windows() -> bool:
+    """是否在 Windows 上執行。
+
+    獨立成函式以便測試替換——Windows 分支無法在非 Windows 平台上實跑，
+    測試以 monkeypatch 覆寫此函式來驗證 argv 組裝與錯誤處理。
+    """
+    return platform.system() == "Windows"
+
 
 _workspace: Path | None = None
 
@@ -85,7 +110,7 @@ def validate_path(path: str) -> Path | None:
     p = (candidate if candidate.is_absolute() else ws / candidate).resolve()
 
     for pattern in BLACKLISTED_PATTERNS:
-        if pattern in str(p):
+        if pattern in _normalized(str(p)):
             return None
 
     # 用 is_relative_to 而非 str.startswith()：後者會把同名前綴的兄弟目錄
@@ -109,42 +134,62 @@ class ShellTool(Tool):
         "required": ["command"]
     }
 
+    def _build_argv(self, command: str) -> list[str] | None:
+        """組出交給 subprocess 的 argv。
+
+        Windows 走 PowerShell 7（`pwsh`）並帶 `-NoProfile -NonInteractive`：
+        前者避免使用者 profile 的輸出或副作用混入結果，後者避免指令等待輸入
+        而卡到逾時。PowerShell 本身提供 `ls` / `cat` / `pwd` / `echo` /
+        `mkdir` 等別名，因此白名單中的 Unix 名稱在 Windows 上同樣可用。
+        """
+        cmd_parts = command.split()
+        if not cmd_parts:
+            return None
+        if _is_windows():
+            return [
+                WINDOWS_SHELL,
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                command,
+            ]
+        return cmd_parts
+
     async def execute(self, **kwargs) -> str:
         command = kwargs.get("command", "")
-        import platform
-        is_windows = platform.system() == "Windows"
 
         if not self._is_command_allowed(command):
             return "Error: Command not allowed. Only predefined safe commands are permitted."
 
-        try:
-            if is_windows:
-                from plumbum import local
-                cmd_parts = command.split()
-                result = local(cmd_parts[0], cmd_parts[1:], shell=False)
-                output = result[1] if len(result) > 1 else str(result[0])
-                return output
-            else:
-                cmd_parts = command.split()
-                if not cmd_parts:
-                    return "Error: Empty command"
+        argv = self._build_argv(command)
+        if argv is None:
+            return "Error: Empty command"
 
-                result = subprocess.run(
-                    cmd_parts,
-                    shell=False,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    timeout=60,
-                )
-                output = result.stdout or result.stderr or "(no output)"
-                if result.returncode != 0:
-                    return f"[Exit code: {result.returncode}]\n{output}"
-                return output
+        try:
+            result = subprocess.run(
+                argv,
+                shell=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                # Windows 主控台輸出可能不是 UTF-8；不讓解碼失敗毀掉整個結果
+                errors="replace",
+                timeout=SHELL_TIMEOUT,
+            )
         except subprocess.TimeoutExpired:
-            return "Error: Command timed out after 60 seconds"
+            return f"Error: Command timed out after {SHELL_TIMEOUT} seconds"
+        except FileNotFoundError:
+            return f"Error: Command not found: {argv[0]}"
         except Exception as e:
             return f"Error: {e}"
+
+        # 失敗時以 stderr 為主：命令可能先輸出一部分再失敗，此時要看到的是
+        # 錯誤原因而非那半截 stdout。
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "(no output)").strip()
+            return f"[Exit code: {result.returncode}]\n{detail}"
+
+        return (result.stdout or result.stderr or "(no output)").strip()
 
     def _is_command_allowed(self, command: str) -> bool:
         """檢查指令是否符合參數政策。
@@ -160,8 +205,10 @@ class ShellTool(Tool):
 
         # shell 工具也必須套用檔案工具的敏感路徑黑名單，
         # 否則 `cat /etc/passwd` 會繞過檔案層的防護。
+        # 先統一斜線：Windows 的反斜線路徑否則可繞過（`C:\Users\me\.ssh\...`）。
+        normalized = _normalized(command)
         for pattern in BLACKLISTED_PATTERNS:
-            if pattern in command:
+            if pattern in normalized:
                 return False
 
         cmd_parts = command.strip().split()

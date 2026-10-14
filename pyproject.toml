@@ -13,7 +13,6 @@ dependencies = [
     "prompt-toolkit>=3.0.50,<4.0.0",
     "json-repair>=0.57.0,<1.0.0",
     "python-telegram-bot>=22.0,<23.0",
-    "plumbum>=1.8.0,<2.0.0",
     "cryptography>=44.0.0,<45.0.0",
 ]
 

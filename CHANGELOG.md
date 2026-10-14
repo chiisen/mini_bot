@@ -6,6 +6,16 @@
 
 ### 修正
 
+- **Windows 上 ShellTool 完全無法運作**：`ShellTool.execute()` 的 Windows 分支呼叫 `local(cmd_parts[0], cmd_parts[1:], shell=False)`，但 `plumbum.local` 是 `LocalMachine` 實例、**不可呼叫**，對**任何**指令都固定拋 `TypeError: 'LocalMachine' object is not callable`。外層的 `except Exception` 會吞掉此例外，因此 Windows 上 ShellTool 一律回傳那一行 TypeError。該呼叫形式在整個支援範圍（plumbum `>=1.8.0,<2.0.0`）內從未有效。
+
+  改為**Windows 一律透過 PowerShell 7（`pwsh -NoProfile -NonInteractive -Command`）執行**——這正是 `GEMINI.md` §3.3 早已記載的根因結論（cmd.exe 與內建 PowerShell 5.1 有輸出緩衝問題，PowerShell 7 正常），plumbum 是走錯的方向。兩個平台共用同一段 `subprocess.run` 與錯誤處理，不再是兩份邏輯。同時移除 `plumbum` 依賴——它僅用於這個從未成功執行的分支。(Fixes #9)
+
+- **命令失敗時看不到 stderr**：失敗路徑原本取 `result.stdout or result.stderr`，命令若先輸出一部分再失敗，看到的會是那半截 stdout 而非錯誤原因。改為失敗時以 stderr 優先。(Why: 這正是 #9 的症狀——使用者只看到一行 TypeError，看不到真正發生什麼事)
+
+- **敏感路徑黑名單在 Windows 反斜線路徑下失效**：黑名單樣式一律以正斜線撰寫（`/.ssh/`、`/.aws/` 等），而 Windows 的 `Path` 以反斜線呈現，因此 `cat C:\Users\me\.ssh\id_rsa` 可完全繞過檢查。實測確認 `cat C:\Users\me\.aws\credentials` 亦同。(Why: ShellTool 沒有 workspace 邊界保護，只靠白名單與黑名單；繞過黑名單即等於可讀取私鑰。此缺口在修正 #9 之前不可觸及——因為 ShellTool 在 Windows 上根本無法執行——修正後才成為實際暴露面)
+
+  修正方式為比對前先將反斜線統一為正斜線，`_is_command_allowed()` 與 `validate_path()` 皆套用。
+
 - **Provider 建構時不再寫入全域環境變數**：`LiteLLMProvider.__init__` 過去會執行 `os.environ[env_key] = api_key` 與 `os.environ["MINIMAX_API_BASE"] = api_base`，造成兩個問題：
 
   1. **金鑰洩漏**——環境變數會被子行程繼承。實測建構一個 OpenRouter provider 後，任意子行程都能用 `os.environ["OPENROUTER_API_KEY"]` 讀到完整金鑰。
@@ -56,6 +66,10 @@
 
 ### 修改
 
+- **CI 改為跨平台矩陣**：`.github/workflows/ci.yml` 由單一 `ubuntu-latest` 改為 `matrix.os: [ubuntu-latest, windows-latest]`（`fail-fast: false`），並在 Windows runner 上新增 `Confirm PowerShell 7 is available` 步驟（執行 `pwsh -NoProfile -Command '$PSVersionTable.PSVersion'`）。(Why: #9 這類「只在 Windows 上失效」的缺陷能長期潛伏，正是因為 CI 從來沒跑過 Windows；新增矩陣後 Windows 分支才有真實的驗證關卡，而非僅靠單元測試模擬)
+
+- **移除 `plumbum` 依賴**：`pyproject.toml` 移除 `plumbum>=1.8.0,<2.0.0`；該依賴只用於 Windows 上那個從未成功執行的分支，改走 `subprocess` + PowerShell 7 後已無用途。
+
 - **移除 `TODO.md`**：該檔原本被當作待辦的終點，但依 `AI_GITHUB_PROJECT_GUIDE.md` §1，待辦應建立為 GitHub Issues 以利追蹤。內容已全部遷移後刪除：
   - 相對路徑解析缺陷 → [#15](https://github.com/chiisen/mini_bot/issues/15)
   - Session 逾時跨行程失效 → [#16](https://github.com/chiisen/mini_bot/issues/16)
@@ -70,6 +84,8 @@
 - **README Windows 支援**：新增 Windows 環境準備說明（PowerShell 7）、Windows 安裝指令（PowerShell 指令），並更新功能總覽表格（移除已實現的 Shell 工具）。(Why: 完善跨平台文件)
 
 ### 新增
+
+- **測試：ShellTool Windows 分支**：`tests/test_tools_filesystem.py` 新增 `TestShellWindowsBranch`（6 項，以 monkeypatch `_is_windows` 驗證 argv 組裝為 `pwsh -NoProfile -NonInteractive -Command <原文>`、指令原文完整傳遞、`pwsh` 缺失時的錯誤訊息、Windows stdout 路徑）、`TestShellFailureVisibility`（5 項，鎖定失敗時 stderr 優先）、反斜線黑名單繞過回歸測試，以及 `test_never_calls_plumbum`（鎖定不再回頭使用 plumbum）。另新增 `TestShellWindowsEndToEnd`（3 項，僅在 Windows runner 執行，做真實端到端驗證）。(Why: 修正的是「只在 Windows 失效且被 `except Exception` 吞掉」的路徑，若只用 mock 驗證容易再次漏掉真實環境差異，故同時保留單元與端到端兩層)（測試數 284 passed / 3 skipped；`filesystem.py` 覆蓋率 88% → 95%）
 
 - **測試：CLI 指令**：新增 `tests/test_cli_commands.py`（23 個測試），以 `typer.testing.CliRunner` 驗證 `onboard`（建立設定／workspace、冪等、不覆寫既有檔案）、`status` 與 `config-show`（含 API Key 遮罩）、設定損壞時明確報錯且 exit 1、`onboard` 在設定損壞時仍可執行、`agent`／`telegram` 在設定不足時正確拒絕，以及 `_make_provider()` 的 provider 優先序與 fallback。`cli/commands.py` 覆蓋率 0% → 70%，整體 70% → 84%。（測試數 231 → 254）(Why: CLI 是使用者唯一的操作介面，且是設定載入錯誤的呈現層；測試以 `isolated_home` fixture 隔離 HOME，避免讀寫真實設定)
 
