@@ -54,9 +54,14 @@ def _build_argv(self, command: str) -> list[str] | None:
 無額外依賴，僅使用標準庫 `subprocess`。**執行環境需自備 PowerShell 7 (`pwsh`)**。
 
 ### 3.6 驗證方式
-CI（`.github/workflows/ci.yml`）同時在 `ubuntu-latest` 與 `windows-latest` 上執行測試。
+測試在本機執行：`python -m pytest tests/ --cov=minibot --cov-report=term-missing`。
+
 `TestShellWindowsEndToEnd` 只在 Windows 上跑，會實際透過 `pwsh` 執行白名單指令並
-比對 stdout——這是 Windows 路徑唯一的真實驗證來源。
+比對 stdout——這是 Windows 路徑唯一的**真實**驗證來源。GitHub Actions 已移除
+（測試改由本機執行），因此這個測試目前**沒有任何自動化 runner**：在非 Windows
+平台一律 skip，除非手動在一台裝有 PowerShell 7 的 Windows 機器上跑，否則 Windows
+路徑只有單元測試（模擬）可依賴。詳見
+[#23](https://github.com/chiisen/mini_bot/issues/23)。
 
 參數政策（白名單、敏感路徑、上述 Windows 分隔符）純屬判斷邏輯，不需真的在 Windows
 上跑：`TestShellWindowsStatementSeparators` 以 monkeypatch 覆寫 `_is_windows()`

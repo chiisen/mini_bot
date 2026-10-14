@@ -182,6 +182,10 @@
 
 ### 修改
 
+- **移除 GitHub Actions CI**：`.github/workflows/ci.yml` 刪除，測試改由本機執行（`python -m pytest tests/ --cov=minibot`）。(Why: 由維護者決定，以本機 AI coding 流程取代遠端 CI)
+
+  **隨之而來的驗證缺口**：`TestShellWindowsEndToEnd` 原本由 CI 的 `windows-latest` job 執行，是 Windows 路徑唯一的真實驗證來源；移除 CI 後它在非 Windows 平台一律 skip，等於**沒有任何自動化 runner**。Windows 路徑此後只有以 monkeypatch 模擬的單元測試可依賴，要真實驗證必須手動在一台裝有 PowerShell 7 的 Windows 機器上執行。`GEMINI.md` §3.6 與 `Windows/GEMINI.md` §5 已同步更新，缺口記錄於 [#23](https://github.com/chiisen/mini_bot/issues/23)。同時，先前「CI 是唯一能自動攔截退化風險的機制」這項性質也不再成立。
+
 - **`docs/SECURITY_UPGRADE_TODO.md` T3 勘誤**：記錄 provider 金鑰加密從未生效的經過，並補上可複驗的驗證指令（`grep -c "sk-" ~/.minibot/config.json` 應為 0）。同時記下教訓：加密「有實作」不等於「有效」，只有端到端往返測試能揭露。
 
 - **Telegram channel 改走 MessageBus**：`_handle_message()` 不再直接呼叫 Agent，改為 `publish_inbound()` 發布 `InboundMessage`；`AgentLoop.run()` 與 outbound 派送器則作為背景 task 執行（收訊 → bus → Agent → bus → 送回 Telegram）。頻道因此只需實作「收訊 → publish_inbound」與「收 outbound → 送出」兩件事，與 Agent 解耦。(Fixes #2)

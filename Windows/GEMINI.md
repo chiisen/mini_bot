@@ -58,5 +58,10 @@ return cmd_parts
 
 ## 5. 驗證方式
 
-CI 同時在 `ubuntu-latest` 與 `windows-latest` 執行測試，Windows 路徑由
-`TestShellWindowsEndToEnd` 實際跑 `pwsh` 驗證。
+測試在本機執行：`python -m pytest tests/ --cov=minibot --cov-report=term-missing`。
+
+Windows 路徑的真實驗證靠 `TestShellWindowsEndToEnd`（實際跑 `pwsh`，比對 stdout）。
+GitHub Actions 已移除，因此**這個測試目前沒有自動化 runner**：在非 Windows 平台
+一律 skip。要驗證 Windows 路徑，必須在一台裝有 PowerShell 7 的 Windows 機器上直接
+執行測試；否則只能依賴以 monkeypatch 模擬的單元測試。見
+[#23](https://github.com/chiisen/mini_bot/issues/23)。
