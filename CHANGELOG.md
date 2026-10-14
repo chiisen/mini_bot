@@ -6,6 +6,8 @@
 
 ### 修正
 
+- **`minibot config-show` 有三個欄位永遠顯示 `None`**：`config-show` 以 `model_dump(by_alias=True)` 輸出（camelCase），卻以 snake_case 取值，導致 `max_tool_iterations`、`max_tokens`、`memory_window` 恆為 `None`——正是使用者最需要檢查的執行參數。改為以 alias 鍵名（`maxToolIterations`／`maxTokens`／`memoryWindow`）取用。(Why: 靜默顯示 None 比不顯示更糟，使用者會誤以為設定未生效)
+
 - **注入過濾誤傷以 system/admin/root 開頭的正常輸入**：`INJECTION_PATTERNS` 的 `^\s*(system|admin|root)` 只檢查字串開頭，不看後續內容，導致 `root cause analysis`、`admin panel`、`systemd service`、`rootkit detection` 等技術問答中極常見的詞語被剝掉關鍵詞，Agent 收到殘缺句子且使用者不知情。改為要求冒號分隔（`^\s*(system|admin|root)\s*:`），保留角色冒充的結構性特徵。(Why: 角色冒充的特徵是「角色: 內容」，而非單純以字根開頭；實測修正後攻擊樣本 0 漏網、正常輸入 0 誤傷)
 
 > **注意**：`admin:` 與 `root:` 的攔截**完全依賴此條** —— 第 6 條 `system\s*:\s*` 僅涵蓋 system。已加註解說明並補上回歸測試鎖定此相依性。
@@ -48,6 +50,8 @@
 - **README Windows 支援**：新增 Windows 環境準備說明（PowerShell 7）、Windows 安裝指令（PowerShell 指令），並更新功能總覽表格（移除已實現的 Shell 工具）。(Why: 完善跨平台文件)
 
 ### 新增
+
+- **測試：CLI 指令**：新增 `tests/test_cli_commands.py`（23 個測試），以 `typer.testing.CliRunner` 驗證 `onboard`（建立設定／workspace、冪等、不覆寫既有檔案）、`status` 與 `config-show`（含 API Key 遮罩）、設定損壞時明確報錯且 exit 1、`onboard` 在設定損壞時仍可執行、`agent`／`telegram` 在設定不足時正確拒絕，以及 `_make_provider()` 的 provider 優先序與 fallback。`cli/commands.py` 覆蓋率 0% → 70%，整體 70% → 84%。（測試數 231 → 254）(Why: CLI 是使用者唯一的操作介面，且是設定載入錯誤的呈現層；測試以 `isolated_home` fixture 隔離 HOME，避免讀寫真實設定)
 
 - **測試：LiteLLM Provider**：新增 `tests/test_litellm_provider.py`（22 個測試），以 monkeypatch 攔截 `litellm.acompletion`（**不發出任何網路請求**），涵蓋模型前綴套用（不重複加前綴、None 回退實例預設）、參數組裝（`api_base`／`tools`／`tool_choice` 條件性省略）、tool call 正規化（dict 與不合法 JSON 字串皆經 `json_repair`）、`finish_reason` 與 `usage` 映射、例外不外洩且回傳可讀訊息。`providers/litellm_provider.py` 覆蓋率 0% → 100%，整體 65% → 70%。（測試數 209 → 231）(Why: 這是唯一對外呼叫 LLM 的邊界，出錯會直接影響所有對話；且錯誤處理與參數組裝是靜默失效的高風險區)
 

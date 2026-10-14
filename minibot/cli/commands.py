@@ -199,14 +199,17 @@ def config_show():
     console.print(f"[dim]Locale: {get_locale()}[/dim]\n")
 
     data = config.model_dump(by_alias=True)
+    defaults = data.get("agents", {}).get("defaults", {})
 
+    # 註：by_alias=True 使多欄位輸出為 camelCase（maxTokens 等），
+    # 取值必須用同樣的鍵名，否則會靜默顯示 None。
     console.print("[bold]Agents Defaults:[/bold]")
-    console.print(f"  model: {data.get('agents', {}).get('defaults', {}).get('model')}")
-    console.print(f"  workspace: {data.get('agents', {}).get('defaults', {}).get('workspace')}")
-    console.print(f"  max_tool_iterations: {data.get('agents', {}).get('defaults', {}).get('max_tool_iterations')}")
-    console.print(f"  temperature: {data.get('agents', {}).get('defaults', {}).get('temperature')}")
-    console.print(f"  max_tokens: {data.get('agents', {}).get('defaults', {}).get('max_tokens')}")
-    console.print(f"  memory_window: {data.get('agents', {}).get('defaults', {}).get('memory_window')}")
+    console.print(f"  model: {defaults.get('model')}")
+    console.print(f"  workspace: {defaults.get('workspace')}")
+    console.print(f"  max_tool_iterations: {defaults.get('maxToolIterations')}")
+    console.print(f"  temperature: {defaults.get('temperature')}")
+    console.print(f"  max_tokens: {defaults.get('maxTokens')}")
+    console.print(f"  memory_window: {defaults.get('memoryWindow')}")
 
     console.print("\n[bold]Providers:[/bold]")
     for name in ("minimax", "openrouter", "anthropic", "openai", "deepseek", "gemini"):
