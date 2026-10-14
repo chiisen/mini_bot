@@ -13,8 +13,25 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from minibot.bus.events import InboundMessage, OutboundMessage
-from minibot.channels.telegram import CHANNEL, REPLY_CHUNK_LIMIT, TelegramChannel
+from minibot.channels.telegram import (
+    CHANNEL,
+    REPLY_CHUNK_LIMIT,
+    TelegramChannel,
+    _log_task_death,
+    split_for_telegram,
+)
 from minibot.providers.base import LLMProvider, LLMResponse
+
+
+@pytest.fixture
+def loguru_messages():
+    """收集 loguru 的訊息（loguru 預設不進標準 logging，caplog 收不到）。"""
+    from loguru import logger
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda m: messages.append(m.record["message"]), level="WARNING")
+    yield messages
+    logger.remove(sink_id)
 
 
 class EchoProvider(LLMProvider):
@@ -140,11 +157,16 @@ class TestDeliverOutbound:
         )])
         app.bot.send_message.assert_awaited_with(chat_id=555, text="回覆")
 
-    def test_falls_back_to_chat_id_without_metadata(self, channel):
+    def test_drops_message_without_reply_chat_id(self, channel):
+        """缺 reply_chat_id 時不得以 session 識別當 chat id 送出。
+
+        回歸測試：原本後備成 `msg.chat_id`（即 `user_{id}`），這不是合法的
+        Telegram chat id，送出去必然 BadRequest；寧可留下明確錯誤日誌。
+        """
         app = self._run_dispatch(channel, [OutboundMessage(
             channel=CHANNEL, chat_id="user_123", content="回覆",
         )])
-        app.bot.send_message.assert_awaited_with(chat_id="user_123", text="回覆")
+        app.bot.send_message.assert_not_awaited()
 
     def test_chunks_long_reply(self, channel):
         """Telegram 單則上限 4096 字元，超過必須分段。"""
@@ -170,10 +192,12 @@ class TestDeliverOutbound:
         async def scenario():
             task = asyncio.ensure_future(channel._deliver_outbound(app))
             await channel.bus.publish_outbound(OutboundMessage(
-                channel=CHANNEL, chat_id="user_1", content="第一則"
+                channel=CHANNEL, chat_id="user_1", content="第一則",
+                metadata={"reply_chat_id": 1},
             ))
             await channel.bus.publish_outbound(OutboundMessage(
-                channel=CHANNEL, chat_id="user_1", content="第二則"
+                channel=CHANNEL, chat_id="user_1", content="第二則",
+                metadata={"reply_chat_id": 1},
             ))
             while app.bot.send_message.await_count < 2:
                 await asyncio.sleep(0)
@@ -185,6 +209,62 @@ class TestDeliverOutbound:
 
         asyncio.run(scenario())
         assert app.bot.send_message.await_count == 2
+
+    def test_failed_chunk_does_not_drop_the_rest(self, channel):
+        """某一段失敗時，其餘段落仍必須送出。
+
+        回歸測試：分段迴圈原本被包在單一 `try` 內，任一段失敗就中斷整個
+        for 迴圈，後續段落無聲消失——使用者只看到被截斷的回覆。
+        """
+        app = MagicMock()
+        app.bot.send_message = AsyncMock(
+            side_effect=[RuntimeError("第二段失敗"), None, None]
+        )
+        text = "x" * (REPLY_CHUNK_LIMIT * 2 + 5)  # 三段
+
+        async def scenario():
+            task = asyncio.ensure_future(channel._deliver_outbound(app))
+            await channel.bus.publish_outbound(OutboundMessage(
+                channel=CHANNEL, chat_id="user_1", content=text,
+                metadata={"reply_chat_id": 1},
+            ))
+            while app.bot.send_message.await_count < 3:
+                await asyncio.sleep(0)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(asyncio.wait_for(scenario(), 3.0))
+        assert app.bot.send_message.await_count == 3
+
+
+class TestSplitForTelegram:
+    """Telegram 的長度上限以 UTF-16 碼元計算，不是 Python 字元數。"""
+
+    def test_short_text_is_one_chunk(self):
+        assert split_for_telegram("哈囉") == ["哈囉"]
+
+    def test_empty_text_yields_no_chunks(self):
+        assert split_for_telegram("") == []
+
+    def test_non_bmp_chars_count_as_two_units(self):
+        """回歸測試：4096 個 emoji 是 8192 碼元，以 `len()` 切分會整段送出而遭拒。"""
+        emoji = "\U0001F534"  # 🔴，非 BMP
+        chunks = split_for_telegram(emoji * REPLY_CHUNK_LIMIT)
+
+        assert len(chunks) == 2
+        assert all(len(c) <= REPLY_CHUNK_LIMIT // 2 for c in chunks)
+        assert "".join(chunks) == emoji * REPLY_CHUNK_LIMIT
+
+    def test_chunks_never_exceed_the_limit(self):
+        for text in ["x" * 8193, "\U0001F534" * 3000, "a\U0001F534" * 3000]:
+            chunks = split_for_telegram(text)
+            assert "".join(chunks) == text
+            assert all(
+                len(c.encode("utf-16-le")) // 2 <= REPLY_CHUNK_LIMIT for c in chunks
+            )
 
 
 class TestBackgroundLifecycle:
@@ -246,6 +326,42 @@ class TestBackgroundLifecycle:
 
         asyncio.run(asyncio.wait_for(scenario(), 5.0))
         app.bot.send_message.assert_awaited_with(chat_id=123, text="echo: 哈囉")
+
+    def test_dying_background_task_is_logged(self, channel, loguru_messages):
+        """背景 task 意外死亡必須留下痕跡，而非靜默停止服務。
+
+        這兩個 task 都是無限迴圈，正常只會因取消而結束。若因例外死亡而沒人
+        取用例外，該 bot 會對所有使用者停止處理，只剩一行
+        `Task exception was never retrieved`。
+        """
+        async def scenario():
+            async def boom():
+                raise RuntimeError("queue broken")
+
+            task = asyncio.create_task(boom(), name="minibot-agent-loop")
+            task.add_done_callback(_log_task_death)
+            await asyncio.sleep(0)
+            for _ in range(10):
+                await asyncio.sleep(0)
+                if task.done():
+                    break
+
+        asyncio.run(asyncio.wait_for(scenario(), 3.0))
+        assert any("minibot-agent-loop died" in m for m in loguru_messages)
+
+    def test_cancelled_background_task_is_not_noisy(self, loguru_messages):
+        """正常關閉（取消）不該被當成意外死亡。"""
+        async def scenario():
+            task = asyncio.create_task(asyncio.sleep(60), name="minibot-agent-loop")
+            task.add_done_callback(_log_task_death)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(asyncio.wait_for(scenario(), 3.0))
+        assert not [m for m in loguru_messages if "died" in m]
 
 
 class TestEndToEndThroughBus:

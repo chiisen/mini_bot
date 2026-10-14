@@ -28,6 +28,42 @@ REPLY_CHUNK_LIMIT = 4096
 CHANNEL = "tg"
 
 
+def split_for_telegram(text: str, limit: int = REPLY_CHUNK_LIMIT) -> list[str]:
+    """依 Telegram 的長度上限切分訊息。
+
+    上限是以 **UTF-16 碼元**計算，不是 Python 的字元數：非 BMP 字元
+    （emoji、部分 CJK 擴充字）各佔 2 個碼元。以 `len()` 切分時，
+    4096 個 emoji 會被當成 4096 而整段送出，實際已是 8192 碼元 → `BadRequest`。
+    """
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for ch in text:
+        width = 2 if ord(ch) > 0xFFFF else 1
+        if size + width > limit:
+            chunks.append("".join(current))
+            current, size = [], 0
+        current.append(ch)
+        size += width
+    if current:
+        chunks.append("".join(current))
+    return chunks
+
+
+def _log_task_death(task: asyncio.Task) -> None:
+    """背景 task 若因例外結束，必須留下痕跡。
+
+    兩個背景 task 都是無限迴圈，正常情況下只有取消才會結束。若它們因例外
+    死亡而沒人取用例外，該 bot 會對所有使用者靜默停止處理——只剩一行
+    `Task exception was never retrieved`。
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("Background task {} died: {}", task.get_name(), exc)
+
+
 class TelegramChannel:
     """Telegram Bot 頻道，使用 Polling 模式接收訊息。
 
@@ -116,15 +152,28 @@ class TelegramChannel:
         """把 outbound 佇列的回覆送回 Telegram。"""
         while True:
             msg = await self.bus.consume_outbound()
-            chat_id = msg.metadata.get("reply_chat_id", msg.chat_id)
-            try:
-                for i in range(0, len(msg.content), REPLY_CHUNK_LIMIT):
-                    await application.bot.send_message(
-                        chat_id=chat_id,
-                        text=msg.content[i:i + REPLY_CHUNK_LIMIT],
-                    )
-            except Exception as e:
-                logger.error("Failed to send reply to {}: {}", chat_id, e)
+            # 不用 `msg.chat_id` 當後備：它是 session 識別（`user_{id}`），
+            # 不是合法的 Telegram chat id，送出去必然 BadRequest。
+            chat_id = msg.metadata.get("reply_chat_id")
+            if chat_id is None:
+                logger.error(
+                    "Outbound message for {}:{} has no reply_chat_id; dropped",
+                    msg.channel,
+                    msg.chat_id,
+                )
+                continue
+
+            chunks = split_for_telegram(msg.content)
+            if not chunks:
+                logger.warning("Empty outbound reply for {}:{}", msg.channel, msg.chat_id)
+                continue
+
+            # 逐段獨立送出：某一段失敗不該讓其餘段落連帶消失
+            for chunk in chunks:
+                try:
+                    await application.bot.send_message(chat_id=chat_id, text=chunk)
+                except Exception as e:
+                    logger.error("Failed to send reply to {}: {}", chat_id, e)
 
     async def _start_background(self, application: Application) -> None:
         """啟動 bus 消費與回覆派送 task。
@@ -137,6 +186,8 @@ class TelegramChannel:
         self._dispatcher = asyncio.create_task(
             self._deliver_outbound(application), name="minibot-telegram-dispatcher"
         )
+        for task in (self._worker, self._dispatcher):
+            task.add_done_callback(_log_task_death)
 
     async def _stop_background(self, application: Application) -> None:
         self.agent_loop.stop()
