@@ -49,6 +49,8 @@
 
 ### 新增
 
+- **測試：Agent 迭代迴圈**：新增 `tests/test_agent_loop.py`（21 個測試），以 mock provider 驗證 LLM ↔ Tool 迭代流程：無 tool call 直接回覆、tool 結果的 role／`tool_call_id`／`name` 結構、assistant `tool_calls` 的 JSON 字串序列化、多個 tool call 的執行順序、`max_iterations` 硬性上限、工具輸出截斷至 10000 字元、`on_progress` 回呼、session 持久化與 `memory_window`，以及 Bus 消費模式（`run()`）的 outbound 發佈、session 分流與單則失敗不中斷迴圈。`agent/loop.py` 與 `bus/` 全數 0% → 100%，整體 49% → 65%。（測試數 188 → 209）(Why: `agent/loop.py` 是 Agent 的 orchestrator；Bus 消費模式雖無 channel 使用，仍屬公開 API，日後接線時才發現問題代價較高)
+
 - **測試：session 持久化與隔離**：新增 `tests/test_session_manager.py`（23 個測試），涵蓋訊息往返、tool metadata（`tool_calls`／`tool_call_id`／`name`）保留、owner 隔離（不符者取得空 session 且不污染快取）、快取過期清除、legacy 路徑遷移，以及損壞與空行檔案的健壯性。`session/manager.py` 覆蓋率 0% → 100%，整體 30% → 43%。（測試數 120 → 143）(Why: 此模組負責對話歷史的持久化與使用者隔離，出錯會直接遺失對話或造成跨使用者洩漏)
 
 - **CI（GitHub Actions）**：新增 `.github/workflows/ci.yml`，在 `push` 到 `main` 與 `pull_request` 時安裝 `.[test]` 並執行 `pytest`（附覆蓋率報告），Python 3.11。(Why: 專案先前沒有任何自動化關卡，而這幾天發現的缺陷恰好都藏在測試未覆蓋的路徑上；開發策略改為直接在 `main` 開發後，CI 成為唯一能自動攔截退化風險的機制。**注意其天花板**：CI 沒有 secrets，因此「設定齊備」的路徑仍驗證不到)
