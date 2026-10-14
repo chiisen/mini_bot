@@ -26,6 +26,8 @@
 
 ### 新增
 
+- **CI（GitHub Actions）**：新增 `.github/workflows/ci.yml`，在 `push` 到 `main` 與 `pull_request` 時安裝 `.[test]` 並執行 `pytest`（附覆蓋率報告），Python 3.11。(Why: 專案先前沒有任何自動化關卡，而這幾天發現的缺陷恰好都藏在測試未覆蓋的路徑上；開發策略改為直接在 `main` 開發後，CI 成為唯一能自動攔截退化風險的機制。**注意其天花板**：CI 沒有 secrets，因此「設定齊備」的路徑仍驗證不到)
+
 - **測試：沙盒與 Shell 白名單**：新增 `tests/test_tools_filesystem.py`（51 個測試），涵蓋 `validate_path()` 的 workspace 邊界與敏感路徑黑名單、Shell 指令白名單與危險字元（串接、重導向）、以及 `read_file` / `write_file` / `list_dir` 的存取控制。`agent/tools/filesystem.py` 覆蓋率 0% → 70%，整體 17% → 28%。（測試數 35 → 86）(Why: 此模組是 Agent 的安全邊界卻完全沒有測試，且不需要 API key 或網路即可驗證)
 
 - **待辦索引 `TODO.md`**：集中記錄專案目前的待辦優先序與已知缺口，並指向對應的 GitHub Issue。內容包含排序理由（例如為何應優先補「設定齊備路徑」的測試）、CI 的驗證天花板，以及尚未開成 issue 的事項（`.opencode/package-lock.json` 未忽略、README 失效連結）。(Why: 待辦散落在 issue 與對話中，缺少一份可快速掌握現況與順序的索引)
