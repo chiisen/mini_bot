@@ -6,6 +6,17 @@
 
 ### 修正
 
+- **Provider 建構時不再寫入全域環境變數**：`LiteLLMProvider.__init__` 過去會執行 `os.environ[env_key] = api_key` 與 `os.environ["MINIMAX_API_BASE"] = api_base`，造成兩個問題：
+
+  1. **金鑰洩漏**——環境變數會被子行程繼承。實測建構一個 OpenRouter provider 後，任意子行程都能用 `os.environ["OPENROUTER_API_KEY"]` 讀到完整金鑰。
+  2. **跨 provider 污染**——`api_base` 的變數名是硬編碼的 `MINIMAX_API_BASE`，與實際 provider 無關。實測建構 OpenRouter provider 後，OpenRouter 的端點被寫進 `MINIMAX_API_BASE`；而 `config/schema.py` 的 `load_from_env()` 正好以 `MINIMAX_API_BASE` 作為 MiniMax `apiBase` 的後備值，導致 MiniMax 請求被導向其他 provider 的端點。
+
+  憑證改為一律經由 `chat()` 的 `api_key` / `api_base` 參數傳給 LiteLLM（原本就已如此傳遞，環境變數寫入純屬多餘）。`env_key` 參數保留以相容既有呼叫端，實際不再產生任何環境變數。(Fixes #3)
+
+- **`.opencode/` 本機檔案改由根目錄 `.gitignore` 宣告**：`.opencode/.gitignore` 的內容包含 `.gitignore` 自身，導致它自己被忽略、永遠無法進版控（`git ls-files .opencode/` 僅追蹤 `rules/` 下的兩個檔案）。因此修正只在本機生效，其他克隆者仍會看到 `package-lock.json` 出現在 `git status`。改為在**受版控的根目錄 `.gitignore`** 統一宣告 `.opencode/` 的本機產物。(Fixes #18)
+
+- **README 專案結構連結失效**：連結指向 `MINIBOT_MINIMAL_VERSION.md`，但該檔實際位於 `docs/`，根目錄無此檔。補上 `docs/` 前綴。(Fixes #19)
+
 - **`validate_path()` 以行程 CWD 解析相對路徑**：相對路徑原本以行程 CWD 解析，邊界卻用 workspace 檢查。由於 Agent 啟動時 CWD 通常是專案目錄而非 workspace，模型照著 system prompt 宣告的「Working directory 就是 workspace」使用相對路徑時，一律被拒絕。改為以 workspace 為基準解析相對路徑。(Fixes #15)
 
 - **沙盒邊界可被同名前綴的兄弟目錄繞過**：邊界檢查使用 `str(p).startswith(str(ws))`，會把 `/x/ws_secret` 誤判為 `/x/ws` 的一部分。改用 `Path.is_relative_to()`。(Why: 這是實際的沙盒逃逸——`workspace=/x/ws` 時可讀取 `/x/ws_secret/evil.txt`)
@@ -41,6 +52,7 @@
 - **Config 環境變數驗證器拋出 TypeError**：`config/schema.py` 的 `load_from_env` 先將 `ProviderConfig` / `TelegramConfig` 實例放入 dict，再對其做 item assignment，導致 `MINIMAX_API_KEY` 或 `TELEGRAM_BOT_TOKEN` 存在時 `Config()` 直接失敗（`TypeError: 'ProviderConfig' object does not support item assignment`）。改為純 dict 操作，並以 alias 鍵名（`apiKey` / `apiBase` / `botToken`）寫入——pydantic 在 alias 與欄位名同時存在時以 alias 為準，若寫入 snake_case 會讓 config 檔案的值反過來蓋掉環境變數。(Why: 修復 README 建議的環境變數設定路徑；該路徑失效時 `load_config()` 還會靜默退回預設值，連帶丟棄使用者的整份設定)
 - **測試環境隔離**：`tests/conftest.py` 新增 autouse fixture，清除 config 相關環境變數，避免斷言結果取決於開發機環境。(Why: 這正是上述 bug 能長期潛伏的原因——未設定金鑰的環境完全看不到問題)
 - **測試覆蓋**：`tests/test_config.py` 新增 `TestEnvOverrides`，涵蓋環境變數存在/不存在、以及環境變數覆蓋 config 檔值的雙路徑。（測試數 12 → 19）
+- **測試**：`tests/test_litellm_provider.py` 的 `TestGlobalSideEffect` 原本固化缺陷行為（「環境變數寫入的後果——已記錄但尚未修正」），改為 `TestNoEnvPollution`，斷言翻轉為「建構 provider 不寫入任何環境變數」；另新增 `test_credentials_still_reach_litellm`，確保移除環境變數寫入後憑證仍正確傳給 LiteLLM。（測試數 23 → 23，覆蓋率維持 100%）
 
 ### 修改
 
