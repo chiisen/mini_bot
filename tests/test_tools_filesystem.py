@@ -54,6 +54,63 @@ class TestValidatePathSandbox:
         set_workspace(None)
         assert validate_path("/tmp/anything") is None
 
+    def test_rejects_sibling_directory_with_shared_prefix(self, tmp_path):
+        """回歸測試：原本用 `str.startswith()`，會把同名前綴的兄弟目錄
+        誤判為 workspace 的一部分，造成沙盒逃逸。
+
+        workspace=/x/ws 與 /x/ws_secret 前綴相同但無父子關係。
+        """
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        sibling = tmp_path / "ws_secret"
+        sibling.mkdir()
+        (sibling / "evil.txt").write_text("secret", encoding="utf-8")
+
+        set_workspace(ws)
+        try:
+            assert validate_path(str(sibling / "evil.txt")) is None
+            assert validate_path("../ws_secret/evil.txt") is None
+        finally:
+            set_workspace(None)
+
+    def test_allows_workspace_itself_not_sibling(self, tmp_path):
+        """反向確認：workspace 自身必須仍可存取。"""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "ok.txt").write_text("ok", encoding="utf-8")
+
+        set_workspace(ws)
+        try:
+            assert validate_path("ok.txt") == (ws / "ok.txt").resolve()
+        finally:
+            set_workspace(None)
+
+
+class TestValidatePathRelativeToWorkspace:
+    """回歸測試（#15）：相對路徑必須以 workspace 為基準，而非行程 CWD。
+
+    ContextBuilder 在 system prompt 中宣告「Working directory 就是
+    workspace」，因此模型使用相對路徑時應能正常存取。
+    """
+
+    @pytest.mark.parametrize("path", ["sub/a.txt", "./sub/a.txt", "sub/../sub/a.txt"])
+    def test_relative_paths_resolve_inside_workspace(self, workspace, path):
+        expected = (workspace / "sub" / "a.txt").resolve()
+        assert validate_path(path) == expected
+
+    def test_relative_path_readable_even_when_cwd_differs(self, workspace, monkeypatch, tmp_path_factory):
+        """CWD 與 workspace 不同時，相對路徑仍應指向 workspace。"""
+        elsewhere = tmp_path_factory.mktemp("elsewhere")
+        monkeypatch.chdir(elsewhere)
+
+        result = asyncio.run(
+            ReadFileTool().execute(path="sub/a.txt")
+        )
+        assert result == "hi"
+
+    def test_dot_relative_path_is_workspace(self, workspace):
+        assert validate_path(".") == workspace.resolve()
+
 
 class TestValidatePathBlacklist:
     """即使在 workspace 內，敏感路徑樣式仍須被拒絕。"""

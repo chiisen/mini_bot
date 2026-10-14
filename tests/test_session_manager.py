@@ -67,6 +67,66 @@ class TestExpiryFlag:
         assert Session(key="k").is_expired() is False
 
 
+class TestLoadRestoresUpdatedAt:
+    """回歸測試（#16）：`_load()` 未還原 updated_at，使 SESSION_TIMEOUT
+    跨行程完全失效——重啟後所有舊 session 都被視為剛更新過。"""
+
+    def _write(self, directory, key, updated_at, include_stamp=True):
+        meta = {
+            "_type": "metadata",
+            "key": key,
+            "owner_id": "",
+            "created_at": updated_at.isoformat(),
+        }
+        if include_stamp:
+            meta["updated_at"] = updated_at.isoformat()
+        path = directory / f"{key.replace(':', '_')}.jsonl"
+        path.write_text(
+            json.dumps(meta) + "\n" + json.dumps({"role": "user", "content": "x"}) + "\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_restores_updated_at_from_disk(self, tmp_path):
+        old = datetime.now() - timedelta(days=3)
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        self._write(sessions, "tg:user_1", old)
+
+        session = SessionManager(tmp_path).get_or_create("tg:user_1")
+        assert abs((session.updated_at - old).total_seconds()) < 1
+
+    def test_old_session_is_expiring_after_restart(self, tmp_path):
+        """跨越行程的逾時判斷：重啟後舊 session 應被判為過期。"""
+        old = datetime.now() - timedelta(days=3)
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        self._write(sessions, "tg:user_1", old)
+
+        session = SessionManager(tmp_path).get_or_create("tg:user_1")
+        assert session.is_expired() is True
+
+    def test_recent_session_not_expiring_after_restart(self, tmp_path):
+        recent = datetime.now() - timedelta(minutes=5)
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        self._write(sessions, "tg:user_1", recent)
+
+        session = SessionManager(tmp_path).get_or_create("tg:user_1")
+        assert session.is_expired() is False
+
+    def test_legacy_file_without_updated_at_still_loads(self, tmp_path):
+        """舊格式 session 檔（無 updated_at）必須仍可載入，不得中斷。"""
+        now = datetime.now()
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        self._write(sessions, "cli:direct", now, include_stamp=False)
+
+        session = SessionManager(tmp_path).get_or_create("cli:direct")
+        assert [m["content"] for m in session.messages] == ["x"]
+        assert session.is_expired() is False
+
+
 class TestPersistence:
     def test_round_trip_preserves_messages(self, manager, tmp_path):
         session = manager.get_or_create("cli:direct")

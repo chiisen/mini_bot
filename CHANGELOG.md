@@ -6,6 +6,14 @@
 
 ### 修正
 
+- **`validate_path()` 以行程 CWD 解析相對路徑**：相對路徑原本以行程 CWD 解析，邊界卻用 workspace 檢查。由於 Agent 啟動時 CWD 通常是專案目錄而非 workspace，模型照著 system prompt 宣告的「Working directory 就是 workspace」使用相對路徑時，一律被拒絕。改為以 workspace 為基準解析相對路徑。(Fixes #15)
+
+- **沙盒邊界可被同名前綴的兄弟目錄繞過**：邊界檢查使用 `str(p).startswith(str(ws))`，會把 `/x/ws_secret` 誤判為 `/x/ws` 的一部分。改用 `Path.is_relative_to()`。(Why: 這是實際的沙盒逃逸——`workspace=/x/ws` 時可讀取 `/x/ws_secret/evil.txt`)
+
+- **`_load()` 未還原 `updated_at`，24 小時 Session 逾時跨行程失效**：載入時只還原 `created_at` 而漏了 `updated_at`，導致 Session 一律以「載入當下」為更新時間。重啟後所有舊 session 都被視為剛更新過，`SESSION_TIMEOUT` 只在單一行程的記憶體快取存活期間有效。已還原該欄位，並確認舊格式（無 `updated_at`）與損壞值皆能安全載入。(Fixes #16)
+
+> **行為變更**：修正後，超過 24 小時的舊對話會在重啟後被判定為過期並清空。這是 `SESSION_TIMEOUT` 宣告語意的實際生效。
+
 - **`minibot config-show` 有三個欄位永遠顯示 `None`**：`config-show` 以 `model_dump(by_alias=True)` 輸出（camelCase），卻以 snake_case 取值，導致 `max_tool_iterations`、`max_tokens`、`memory_window` 恆為 `None`——正是使用者最需要檢查的執行參數。改為以 alias 鍵名（`maxToolIterations`／`maxTokens`／`memoryWindow`）取用。(Why: 靜默顯示 None 比不顯示更糟，使用者會誤以為設定未生效)
 
 - **注入過濾誤傷以 system/admin/root 開頭的正常輸入**：`INJECTION_PATTERNS` 的 `^\s*(system|admin|root)` 只檢查字串開頭，不看後續內容，導致 `root cause analysis`、`admin panel`、`systemd service`、`rootkit detection` 等技術問答中極常見的詞語被剝掉關鍵詞，Agent 收到殘缺句子且使用者不知情。改為要求冒號分隔（`^\s*(system|admin|root)\s*:`），保留角色冒充的結構性特徵。(Why: 角色冒充的特徵是「角色: 內容」，而非單純以字根開頭；實測修正後攻擊樣本 0 漏網、正常輸入 0 誤傷)

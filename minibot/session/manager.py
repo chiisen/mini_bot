@@ -147,6 +147,10 @@ class SessionManager:
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
+                        # updated_at 必須一併還原，否則 Session 會以「載入當下」
+                        # 作為更新時間，使 SESSION_TIMEOUT 跨行程完全失效
+                        # （重啟後所有舊 session 都被視為剛更新過）。
+                        updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
                         loaded_owner_id = data.get("owner_id", "")
                     else:
@@ -157,6 +161,7 @@ class SessionManager:
                 owner_id=owner_id or loaded_owner_id,
                 messages=messages,
                 created_at=created_at or datetime.now(),
+                updated_at=updated_at or datetime.now(),
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )

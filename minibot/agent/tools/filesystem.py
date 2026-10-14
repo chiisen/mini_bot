@@ -69,19 +69,28 @@ def get_workspace() -> Path | None:
 
 
 def validate_path(path: str) -> Path | None:
-    """Validate and resolve path within workspace bounds."""
+    """Validate and resolve path within workspace bounds.
+
+    相對路徑以 workspace 為基準解析（而非行程 CWD），與 ContextBuilder 在
+    system prompt 中宣告的「Working directory 就是 workspace」一致。
+    絕對路徑則照原樣處理，但仍須通過 workspace 邊界與黑名單檢查。
+    """
     workspace = get_workspace()
     if workspace is None:
         return None
 
-    p = Path(path).expanduser().resolve()
-    ws = workspace.resolve()
+    ws = workspace.expanduser().resolve()
+    candidate = Path(path).expanduser()
+    # 絕對路徑直接使用；相對路徑掛在 workspace 之下。
+    p = (candidate if candidate.is_absolute() else ws / candidate).resolve()
 
     for pattern in BLACKLISTED_PATTERNS:
         if pattern in str(p):
             return None
 
-    if not str(p).startswith(str(ws)):
+    # 用 is_relative_to 而非 str.startswith()：後者會把同名前綴的兄弟目錄
+    # （例如 workspace=/x/ws 與 /x/ws_secret）誤判為在 workspace 內，造成沙盒逃逸。
+    if not p.is_relative_to(ws):
         return None
 
     return p
