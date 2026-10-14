@@ -6,6 +6,8 @@
 
 ### 修正
 
+- **`list_sessions()` 在 metadata 缺 `updated_at` 時整批崩潰**：`sorted()` 的鍵值取用 `.get("updated_at", "")`，但此處要處理的是「鍵存在、值為 `None`」而非「鍵不存在」，因此預設值無效，`None` 與 `str` 比較會拋 `TypeError`。單一筆異常 session 檔就會讓整個列表失敗。改為 `.get("updated_at") or ""`，並讓缺時間戳的 session 排在最後。(Why: 修正 #17；`list_sessions()` 目前雖無呼叫點，但 #5 要實作的 Session 管理指令必然會用到)
+
 - **ShellTool 無法執行帶參數的指令**：`execute()` 的子命令檢查把「第一個參數」當成「子命令」，而 `ALLOWED_COMMANDS` 對單字指令（`ls`、`cat`…）只把指令名放進自己的清單，導致 `ls -la`、`cat <file>`、`echo hi`、`mkdir <dir>` 一律被拒——Unix 上幾乎只能執行無參數指令（`git` 因清單恰好包含子命令名而僥倖可用）。改為明確定義參數政策：
   - 唯讀指令（`ls`／`cat`／`head`／`tail`／`grep`／`pwd`／`echo`／`mkdir`／`touch`）允許任意參數
   - 具副作用指令只開放列舉的子命令：`git` 僅 `status`／`log`／`diff`／`branch`；`pip`、`curl`、`npm`、`node`、`python` 僅查詢類（`--version`／`list`）

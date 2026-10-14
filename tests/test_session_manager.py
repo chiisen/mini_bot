@@ -200,6 +200,45 @@ class TestListSessions:
         (sessions / "bad.jsonl").write_text("{ not json", encoding="utf-8")
         assert manager.list_sessions() == []
 
+    def test_missing_updated_at_does_not_crash(self, manager, tmp_path):
+        """回歸測試（#17）：metadata 缺 updated_at 時原本整批拋 TypeError。
+
+        `.get(key, "")` 的預設值無效，因為鍵存在、值為 None。
+        """
+        sessions = tmp_path / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / "cli_direct.jsonl").write_text(
+            json.dumps({
+                "_type": "metadata",
+                "key": "cli:direct",
+                "created_at": datetime.now().isoformat(),
+            }) + "\n",
+            encoding="utf-8",
+        )
+
+        items = manager.list_sessions()
+        assert len(items) == 1
+        assert items[0]["updated_at"] is None
+
+    def test_sessions_with_and_without_updated_at_coexist(self, manager, tmp_path):
+        """缺欄位與正常欄位應能共存，且有時間戳的排在前面。"""
+        sessions = tmp_path / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / "no_stamp.jsonl").write_text(
+            json.dumps({"_type": "metadata", "key": "cli:direct",
+                        "created_at": datetime.now().isoformat()}) + "\n",
+            encoding="utf-8",
+        )
+        (sessions / "tg_user_9.jsonl").write_text(
+            json.dumps({"_type": "metadata", "key": "tg:user_9",
+                        "created_at": datetime.now().isoformat(),
+                        "updated_at": datetime.now().isoformat()}) + "\n",
+            encoding="utf-8",
+        )
+
+        keys = [i["key"] for i in manager.list_sessions()]
+        assert keys == ["tg:user_9", "cli:direct"]
+
     def test_lists_saved_sessions_sorted_newest_first(self, manager, tmp_path):
         manager.save(manager.get_or_create("cli:direct"))
         manager.save(manager.get_or_create("tg:user_1"))

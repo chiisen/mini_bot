@@ -214,4 +214,10 @@ class SessionManager:
             except Exception:
                 continue
 
-        return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+        # 用 `or ""` 而非預設參數：要處理的是「值為 None」而非「鍵不存在」。
+        # 舊版或手動編輯過的 session 檔可能缺 updated_at，單一異常不應讓整批失敗。
+        return sorted(
+            sessions,
+            key=lambda x: x.get("updated_at") or "",
+            reverse=True,
+        )
