@@ -337,7 +337,7 @@ minibot telegram
 
 ## 🏗️ 專案結構
 
-詳見 [MINIBOT_MINIMAL_VERSION.md](MINIBOT_MINIMAL_VERSION.md)
+詳見 [docs/MINIBOT_MINIMAL_VERSION.md](docs/MINIBOT_MINIMAL_VERSION.md)
 
 ## 📏 程式碼量統計 (極簡約定)
 
