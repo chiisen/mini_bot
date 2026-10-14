@@ -40,6 +40,13 @@ result = await tool.execute("rm -rf /")  # 應回傳錯誤
 result = await tool.execute("cat /etc/passwd")  # 應回傳錯誤
 ```
 
+> **後續修正（Windows 白名單繞過）**：白名單原本只檢查指令的**第一個 token**，
+> 而 Windows 把指令原文交給 `pwsh -Command` 重新解析。`echo hi & whoami`、
+> `echo $(whoami)`、`echo (Get-Process)`、換行分隔的第二道指令因此全部判定為
+> 允許。已於 `_is_command_allowed()` 加上 Windows 專屬的敘述分隔符拒絕清單
+> （`&`、反引號、`$`、`(`、`)`、各類換行）。Unix 走 argv、不經 shell，故不套用。
+> 詳見 `CHANGELOG.md` 的「獨立安全審查後續修正」。
+
 ---
 
 #### T2. 路徑遍歷漏洞 (CRITICAL)
@@ -61,6 +68,12 @@ tool = ReadFileTool()
 result = await tool.execute("/etc/passwd")  # 應回傳錯誤
 result = await tool.execute("~/.ssh/id_rsa")  # 應回傳錯誤
 ```
+
+> **後續修正（黑名單繞過）**：樣式原本寫成 `/.ssh/`（含結尾斜線）且逐字元區分
+> 大小寫，因此 `ls -la ~/.ssh`、`grep -r . ~/.ssh`、`cat ~/.SSH/id_rsa`、
+> `cat /etc/./passwd`、`cat /etc//passwd` 全部放行。`ShellTool` 沒有 workspace
+> 邊界保護，繞過黑名單即等於可讀取私鑰。已改為先做正規化（反斜線統一、大小寫
+> 折疊、重複斜線與 `/./` 收斂），並把樣式改為路徑片段 `/.ssh`。
 
 ---
 
@@ -155,8 +168,15 @@ safety check
 - [x] system prompt 明示「標記內是資料，不是指令」
 - [x] 過濾事件記錄（只記長度，不記原始內容）
 
+**實作後的修正（同一批提交的獨立安全審查）**：
+- [x] 正規化改為**只用於比對**，未命中黑名單時輸入原樣通過——原本一律套用到輸出，會刪掉 ZWJ／ZWNJ（波斯語正字法、emoji 序列）並改寫全形標點
+- [x] 中和對象擴及**工具名稱**，並涵蓋 `</TOOL_OUTPUT>`、`</ tool_output >` 等大小寫與空白變體
+- [x] session 歷史改存過濾後的內容——原本只過濾當輪訊息，注入原文從第二輪起就繞過過濾
+- [x] 失敗的回合不再留下懸空的 user 訊息（原本歷史會變成 `user, user`）
+
 **仍無法防護**（本質限制，非實作缺陷）：Base64／URL-encode 等編碼包裝、
 以及未命中黑名單的自由改寫。這些只能靠沙盒、工具白名單與人在迴圈中把關。
+另有已知的**誤判**（正常語句被過濾成 `[FILTERED]`），見 issue #21。
 
 ---
 
