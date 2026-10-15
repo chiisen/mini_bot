@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from minibot.agent.loop import AgentLoop
+from minibot.agent.loop import MEMORY_CHAR_LIMIT, AgentLoop
 from minibot.bus.queue import MessageBus
 from minibot.i18n import t
 from minibot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -201,6 +201,67 @@ class TestMultipleToolCalls:
 
         tool_msgs = [m for m in provider.calls[1] if m["role"] == "tool"]
         assert [m["tool_call_id"] for m in tool_msgs] == ["c1", "c2"]
+
+
+def _consolidation_reply(memory: str, history: str) -> LLMResponse:
+    return LLMResponse(content=f"MEMORY:\n{memory}\nHISTORY:\n{history}")
+
+
+class TestMemoryConsolidation:
+    def test_writes_memory_without_touching_messages(self, workspace):
+        provider = ScriptedProvider([
+            LLMResponse(content="你好"),
+            _consolidation_reply("使用者偏好繁體中文", "問了招呼"),
+        ])
+        loop = make_loop(provider, workspace)
+        loop.consolidate_every = 2
+
+        result = asyncio.run(loop.process_direct("嗨"))
+        session = loop.session_mgr.get("cli:direct")
+        assert result == "你好"
+        assert session.last_consolidated == 2
+        assert [m["role"] for m in session.messages] == ["user", "assistant"]
+        assert session.messages[0]["content"] == "嗨"
+        assert (workspace / "memory" / "MEMORY.md").read_text(encoding="utf-8") == "使用者偏好繁體中文"
+        assert "問了招呼" in (workspace / "memory" / "HISTORY.md").read_text(encoding="utf-8")
+        assert provider.tools_arg[1] is None
+
+    def test_skips_until_threshold(self, workspace):
+        provider = ScriptedProvider([LLMResponse(content="你好")])
+        loop = make_loop(provider, workspace)
+        loop.consolidate_every = 4
+        asyncio.run(loop.process_direct("嗨"))
+        assert len(provider.calls) == 1
+        assert not (workspace / "memory" / "MEMORY.md").exists()
+
+    def test_failure_does_not_affect_the_reply(self, workspace):
+        class Failing(ScriptedProvider):
+            async def chat(self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7):
+                if messages and str(messages[-1].get("content", "")).startswith("CONSOLIDATE"):
+                    raise RuntimeError("llm down")
+                return await super().chat(messages, tools, model, max_tokens, temperature)
+
+        provider = Failing([LLMResponse(content="你好")])
+        loop = make_loop(provider, workspace)
+        loop.consolidate_every = 2
+        result = asyncio.run(loop.process_direct("嗨"))
+        session = loop.session_mgr.get("cli:direct")
+        assert result == "你好"
+        assert session.last_consolidated == 0
+        assert len(session.messages) == 2
+        assert not (workspace / "memory" / "MEMORY.md").exists()
+
+    def test_memory_is_capped(self, workspace):
+        provider = ScriptedProvider([
+            LLMResponse(content="你好"),
+            _consolidation_reply("記" * (MEMORY_CHAR_LIMIT + 50), "一筆日誌"),
+        ])
+        loop = make_loop(provider, workspace)
+        loop.consolidate_every = 2
+        asyncio.run(loop.process_direct("嗨"))
+        stored = (workspace / "memory" / "MEMORY.md").read_text(encoding="utf-8")
+        assert len(stored) == MEMORY_CHAR_LIMIT
+        assert stored == "記" * MEMORY_CHAR_LIMIT
 
 
 class TestMaxIterations:

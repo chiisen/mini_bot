@@ -314,7 +314,7 @@ minibot telegram
 | **📂 檔案工具** | `read_file`、`write_file`、`list_dir` |
 | **💻 Shell 工具** | `shell` — 讓 Agent 能執行系統指令 |
 | **💾 Session 持久化** | JSONL 格式，自動載入歷史對話。`minibot sessions` 可列出、查看、刪除；`agent`／`telegram` 啟動時會清掉超過 7 天的檔案 |
-| **🧠 記憶系統** | `MEMORY.md` 長期記憶 + `HISTORY.md` 歷史日誌 |
+| **🧠 記憶系統** | `MEMORY.md` 長期記憶 + `HISTORY.md` 歷史日誌。未整合訊息達 30 則時自動摘要寫入，失敗不影響當前回覆 |
 | **⚙️ 設定系統** | Pydantic schema，`~/.minibot/config.json`（repo 外，安全） |
 | **📡 狀態監控** | `minibot status` 顯示設定、Provider、Telegram 狀態 |
 
@@ -323,7 +323,6 @@ minibot telegram
 | 功能 | 說明 |
 |---|---|
 | 🌐 Web 工具 | `web_search`、`web_fetch` — 讓 Agent 能上網搜尋 |
-| 📚 記憶自動整合 | 自動將對話摘要寫入 MEMORY.md |
 | ⏰ Cron 排程 | 定時任務 |
 | 🛠️ MCP 支援 | 外部工具伺服器 |
 | 📢 更多頻道 | Discord、Slack 等 |

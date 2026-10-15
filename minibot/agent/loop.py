@@ -17,6 +17,21 @@ from minibot.i18n import t
 from minibot.providers.base import LLMProvider
 from minibot.session.manager import Session, SessionManager
 
+# 未整合訊息達到此數才呼叫 LLM 摘要。30 約為 15 輪來回。
+CONSOLIDATE_EVERY = 30
+# MEMORY.md 整檔覆寫，必須有上限，否則每次整合都會把檔案撐大。
+MEMORY_CHAR_LIMIT = 4000
+
+
+def _parse_consolidation(text: str) -> tuple[str, str] | None:
+    if "MEMORY:" not in text or "HISTORY:" not in text:
+        return None
+    memory = text.split("MEMORY:", 1)[1].split("HISTORY:", 1)[0].strip()
+    history = text.split("HISTORY:", 1)[1].strip()
+    if not memory or not history:
+        return None
+    return memory, history
+
 
 class AgentLoop:
     """最小 Agent 迴圈：接收訊息 → 建立 context → 呼叫 LLM → 執行工具 → 回覆。"""
@@ -42,6 +57,7 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        self.consolidate_every = CONSOLIDATE_EVERY
         self.context = ContextBuilder(workspace)
         self.tools = ToolRegistry()
         self.session_mgr = session_manager or SessionManager(workspace)
@@ -139,8 +155,56 @@ class AgentLoop:
         session.add_message("user", safe_content)
         session.add_message("assistant", final_content)
         self.session_mgr.save(session)
+        await self._maybe_consolidate(session)
 
         return final_content
+
+    async def _maybe_consolidate(self, session: Session) -> None:
+        """把累積的對話摘要寫進 MEMORY.md / HISTORY.md。
+
+        失敗只記日誌。訊息列表維持 append-only，不在這裡刪改。
+        """
+        end = len(session.messages)
+        if end - session.last_consolidated < self.consolidate_every:
+            return
+        chunk = list(session.messages[session.last_consolidated:end])
+        existing = self.context.memory.read_long_term()
+        prompt = (
+            "CONSOLIDATE the conversation into durable memory.\n"
+            "Reply in the user's language with exactly two sections and nothing else:\n"
+            "MEMORY:\n<updated long-term facts>\n"
+            "HISTORY:\n<one log entry for the new messages>\n\n"
+            f"Existing MEMORY:\n{existing}\n\n"
+            "New messages:\n"
+            + "\n".join(
+                f"{m.get('role', '?')}: {str(m.get('content', ''))[:500]}"
+                for m in chunk
+            )
+        )
+        try:
+            resp = await self.provider.chat(
+                messages=[{"role": "user", "content": prompt}],
+                tools=None,
+                model=self.model,
+                max_tokens=1024,
+                temperature=0.2,
+            )
+            parsed = _parse_consolidation(resp.content or "")
+            if parsed is None:
+                logger.warning("Memory consolidation returned an unusable summary")
+                return
+            memory_text, history_entry = parsed
+            if len(memory_text) > MEMORY_CHAR_LIMIT:
+                memory_text = memory_text[-MEMORY_CHAR_LIMIT:]
+            self.context.memory.write_long_term(memory_text)
+            self.context.memory.append_history(history_entry)
+        except Exception as e:
+            logger.warning("Memory consolidation failed: {}", e)
+            return
+
+        # 只前進計數。messages 本體不改，避免破壞已送出的 LLM cache 前提。
+        session.last_consolidated = end
+        self.session_mgr.save(session)
 
     async def run(self) -> None:
         """Bus 消費迴圈（Gateway 模式用）。
