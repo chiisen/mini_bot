@@ -4,13 +4,17 @@
 而模組層級就會呼叫 `load_config()`。因此每個測試都以 `isolated_home`
 fixture 重導 HOME 與相關模組的全域狀態，避免讀寫使用者的真實設定。
 
-`agent` 與 `telegram` 需要真實 LLM / 網路，因此只驗證它們在設定不足時
-能否正確拒絕，不發出實際請求。
+設定不足時驗證命令會拒絕。成功路徑以假 provider／假 channel 驗證，不發出實際請求。
 """
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 from typer.testing import CliRunner
+
+from minibot.providers.base import LLMProvider, LLMResponse
 
 import minibot.cli.commands as cmds
 from minibot.config.schema import Config
@@ -90,6 +94,15 @@ class TestStatus:
         result = runner.invoke(cmds.app, ["status"])
         assert "Telegram" in result.output
 
+    def test_masks_telegram_token_when_configured(self, isolated_home):
+        token = "1234567890abcdef"
+        write_config(isolated_home, {"channels": {"telegram": {"botToken": token}}})
+
+        result = runner.invoke(cmds.app, ["status"])
+        assert result.exit_code == 0
+        assert "12345678...cdef" in result.output
+        assert token not in result.output
+
 
 class TestConfigShow:
     def test_displays_agents_defaults(self, isolated_home):
@@ -134,6 +147,17 @@ class TestConfigShow:
         assert "sk-12345...cdef" in result.output
         assert "sk-1234567890abcdef" not in result.output
 
+    def test_masks_telegram_token_when_configured(self, isolated_home):
+        token = "1234567890abcdef"
+        write_config(isolated_home, {
+            "channels": {"telegram": {"botToken": token}}
+        })
+
+        result = runner.invoke(cmds.app, ["config-show"])
+        assert result.exit_code == 0
+        assert "12345678...cdef" in result.output
+        assert token not in result.output
+
 
 class TestConfigErrorHandling:
     """設定檔損壞時必須明確報錯並以非零狀態結束。"""
@@ -174,6 +198,55 @@ class TestAgentCommand:
         assert result.exit_code == 1
 
 
+class _FakeProvider(LLMProvider):
+    def __init__(self):
+        super().__init__("k")
+        self.seen: list[str] = []
+
+    async def chat(self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7):
+        self.seen.append(messages[-1]["content"])
+        return LLMResponse(content="假回覆")
+
+    def get_default_model(self):
+        return "fake/model"
+
+
+class TestAgentSuccessPath:
+    def _patch_provider(self, monkeypatch):
+        provider = _FakeProvider()
+        monkeypatch.setattr(cmds, "_make_provider", lambda config: provider)
+        return provider
+
+    def test_single_message_uses_provider_and_prints_reply(self, isolated_home, monkeypatch):
+        write_config(isolated_home, {"agents": {"defaults": {"workspace": str(isolated_home / "ws")}}})
+        provider = self._patch_provider(monkeypatch)
+
+        result = runner.invoke(cmds.app, ["agent", "-m", "你好", "--no-markdown"])
+        assert result.exit_code == 0
+        assert "假回覆" in result.output
+        assert provider.seen == ["你好"]
+
+    def test_interactive_loop_feeds_each_line_and_exits(self, isolated_home, monkeypatch):
+        write_config(isolated_home, {"agents": {"defaults": {"workspace": str(isolated_home / "ws")}}})
+        provider = self._patch_provider(monkeypatch)
+
+        class ScriptedPrompt:
+            def __init__(self):
+                self.pending = ["hi", "   ", "bye", "exit"]
+
+            async def prompt_async(self, *_args, **_kwargs):
+                if not self.pending:
+                    raise EOFError
+                return self.pending.pop(0)
+
+        monkeypatch.setattr(cmds, "PromptSession", ScriptedPrompt)
+
+        result = runner.invoke(cmds.app, ["agent", "--no-markdown"])
+        assert result.exit_code == 0
+        assert provider.seen == ["hi", "bye"]
+        assert result.output.count("假回覆") == 2
+
+
 class TestTelegramCommand:
     def test_exits_when_token_missing(self, isolated_home):
         write_config(isolated_home, {"channels": {"telegram": {"botToken": ""}}})
@@ -186,6 +259,54 @@ class TestTelegramCommand:
 
         result = runner.invoke(cmds.app, ["telegram"])
         assert result.exit_code == 1
+
+    def test_starts_channel_with_config(self, isolated_home, monkeypatch):
+        token = "1234567890abcdef"
+        write_config(isolated_home, {
+            "providers": {"minimax": {"apiKey": "sk-1234567890abcdef"}},
+            "channels": {"telegram": {"botToken": token}},
+            "agents": {"defaults": {"workspace": str(isolated_home / "ws"), "model": "fake/model"}},
+        })
+        created = {}
+
+        class FakeChannel:
+            def __init__(self, **kwargs):
+                created.update(kwargs)
+
+            def run(self):
+                created["ran"] = True
+
+        monkeypatch.setattr(cmds, "_make_provider", lambda config: _FakeProvider())
+        monkeypatch.setattr("minibot.channels.telegram.TelegramChannel", FakeChannel)
+
+        result = runner.invoke(cmds.app, ["telegram"])
+        assert result.exit_code == 0
+        assert created["ran"] is True
+        assert created["bot_token"] == token
+        assert created["model"] == "fake/model"
+        assert created["workspace"] == isolated_home / "ws"
+
+
+class TestStartupLocaleFallback:
+    def test_corrupt_config_at_import_does_not_force_english(self, tmp_path):
+        """34–37 行只在匯入期設定就壞掉時執行，必須用子行程重現。"""
+        home = tmp_path / "home"
+        (home / ".minibot").mkdir(parents=True)
+        (home / ".minibot" / "config.json").write_text("{", encoding="utf-8")
+        env = os.environ.copy()
+        env["HOME"] = str(home)
+        env["USERPROFILE"] = str(home)
+        env["MINIBOT_LOCALE"] = "zh_TW"
+        proc = subprocess.run(
+            [sys.executable, "-c", "import minibot.cli.commands as c; print(repr(c._startup_locale))"],
+            cwd=os.getcwd(),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip() == "None"
 
 
 class TestMakeProvider:
