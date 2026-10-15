@@ -320,12 +320,14 @@ minibot telegram
 
 ### 🔮 未來擴展
 
+以下是**未排程構想**，不是已承諾要做的功能。每一項都有 Issue 可追蹤。
+
 | 功能 | 說明 |
 |---|---|
-| 🌐 Web 工具 | `web_search`、`web_fetch` — 讓 Agent 能上網搜尋 |
-| ⏰ Cron 排程 | 定時任務 |
-| 🛠️ MCP 支援 | 外部工具伺服器 |
-| 📢 更多頻道 | Discord、Slack 等 |
+| 🌐 Web 工具 | `web_search`、`web_fetch` — 見 [#28](https://github.com/chiisen/mini_bot/issues/28) |
+| ⏰ Cron 排程 | 定時任務 — 見 [#29](https://github.com/chiisen/mini_bot/issues/29) |
+| 🛠️ MCP 支援 | 外部工具伺服器 — 見 [#30](https://github.com/chiisen/mini_bot/issues/30) |
+| 📢 更多頻道 | Discord、Slack 等 — 見 [#31](https://github.com/chiisen/mini_bot/issues/31) |
 
 ## 📡 支援的 Provider（優先順序）
 

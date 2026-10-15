@@ -6,6 +6,8 @@
 
 ### 修正
 
+- **README 未來擴展有四項沒有 Issue**：記憶自動整合已實作並從清單移除。其餘四項標成未排程構想，並分別開 [#28](https://github.com/chiisen/mini_bot/issues/28)、[#29](https://github.com/chiisen/mini_bot/issues/29)、[#30](https://github.com/chiisen/mini_bot/issues/30)、[#31](https://github.com/chiisen/mini_bot/issues/31)。(Fixes #27)
+
 - **對話不會沉澱進長期記憶**：`process_direct()` 在未整合訊息達到 30 則後，呼叫 LLM 產出 `MEMORY:`／`HISTORY:` 並寫入既有的 `MemoryStore`。只更新 `last_consolidated`，不改訊息列表。`MEMORY.md` 超過 4000 字元時保留尾端。整合失敗只記日誌，當前回覆仍照常送出。(Fixes #6)
 
 - **Session 檔只會累積、沒有管理入口**：新增 `minibot sessions list|show|clear|prune`。`prune` 依 `updated_at` 刪除超過期限的檔案，缺時間戳的舊檔保留。`agent` 與 `telegram` 啟動時以 7 天為預設保留期限自動清理。既有未過期檔案不會被改寫。(Fixes #5)
