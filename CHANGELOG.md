@@ -6,6 +6,8 @@
 
 ### 修正
 
+- **中文注入的已知誤傷沒有棘輪**：#21 裁定不修的三句正常中文，之後若誤傷範圍擴大不會有測試失敗。新增 xfail（目標行為）與現行輸出快照（含全形標點被轉半形）。快照改變代表範圍變了，必須一併檢視能否拿掉 xfail。(Fixes #25)
+
 - **工具迭代達到上限時，回覆是硬編碼英文**：`AgentLoop` 在 `max_iterations` 用盡時回傳 `Reached max iterations.`，這句會原樣送到 CLI／Telegram，並寫進 session。改為 `error.max_iterations_reached`，en／zh_TW／zh_CN 皆有翻譯。(Fixes #26)
 
 - **API Key 以明文寫入 `config.json`**：`loader.py` 的 `_encrypt_sensitive_fields()` / `_decrypt_sensitive_fields()` 在**最上層**尋找 `<provider>.apiKey`，但 provider 金鑰實際位於 `providers.<provider>.apiKey`。因此設定 `MINIBOT_CONFIG_KEY` 後，**provider 金鑰從未真正加密**，`save_config()` 一律以明文落盤；只有 telegram `botToken` 因為路徑剛好寫對而正常，讓缺陷更難察覺。實測（設定金鑰後存檔）：

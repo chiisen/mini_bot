@@ -227,6 +227,31 @@ class TestChineseAndEncodingVariants:
     def test_does_not_over_block_normal_chinese(self, builder, text):
         assert "[FILTERED]" not in builder.sanitize_input(text)
 
+    # #21 裁定這三句的誤傷不修。這裡同時做兩件事：
+    # 1. xfail 描述「不該被誤傷」——規則改善後會變成 XPASS，拿掉標記即可。
+    # 2. 快照描述「現在長怎樣」——誤傷變多、變少，或全形標點轉換範圍變動，都會失敗。
+    #    快照不是期望行為；它變了就要回頭看 xfail 是否已可升級。
+    @pytest.mark.parametrize("text", [
+        "我忘記之前的設定了，幫我重新設定一下",
+        "請忘掉前面的設定值，改回預設",
+        "忽略所有的設定檔，只讀這個",
+    ])
+    @pytest.mark.xfail(
+        reason="已知限制（#21 不修）：這三句正常中文仍會被注入規則誤傷",
+        strict=False,
+    )
+    def test_known_chinese_false_positives_should_pass_through(self, builder, text):
+        assert builder.sanitize_input(text) == text
+
+    @pytest.mark.parametrize("text,expected", [
+        ("我忘記之前的設定了，幫我重新設定一下", "我[FILTERED]了,幫我重新設定一下"),
+        ("請忘掉前面的設定值，改回預設", "請[FILTERED]值,改回預設"),
+        ("忽略所有的設定檔，只讀這個", "[FILTERED]檔,只讀這個"),
+    ])
+    def test_known_chinese_false_positive_snapshot(self, builder, text, expected):
+        """記錄已知誤傷的現行輸出，包含全形標點被轉成半形。不是期望行為。"""
+        assert builder.sanitize_input(text) == expected
+
 
 class TestToolOutputWrapping:
     """#4：工具輸出以結構化邊界標記為不可信資料。"""
