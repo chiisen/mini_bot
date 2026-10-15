@@ -28,19 +28,25 @@ REPLY_CHUNK_LIMIT = 4096
 CHANNEL = "tg"
 
 
-def split_for_telegram(text: str, limit: int = REPLY_CHUNK_LIMIT) -> list[str]:
-    """依 Telegram 的長度上限切分訊息。
+def _conservative_width(text: str) -> int:
+    """Python 字元數與 UTF-16 碼元數取較大者。
 
-    上限是以 **UTF-16 碼元**計算，不是 Python 的字元數：非 BMP 字元
-    （emoji、部分 CJK 擴充字）各佔 2 個碼元。以 `len()` 切分時，
-    4096 個 emoji 會被當成 4096 而整段送出，實際已是 8192 碼元 → `BadRequest`。
+    Telegram 文件只寫 4096，沒有約定用哪一種數法。emoji 在字元數是 1、
+    在 UTF-16 是 2。取較大值就會較早切開，兩種算法都不會超限。
     """
+    if not text:
+        return 0
+    return max(len(text), len(text.encode("utf-16-le")) // 2)
+
+
+def split_for_telegram(text: str, limit: int = REPLY_CHUNK_LIMIT) -> list[str]:
+    """依較嚴格的長度切分訊息，使每一段同時不超過字元數與 UTF-16 碼元數。"""
     chunks: list[str] = []
     current: list[str] = []
     size = 0
     for ch in text:
-        width = 2 if ord(ch) > 0xFFFF else 1
-        if size + width > limit:
+        width = _conservative_width(ch)
+        if current and size + width > limit:
             chunks.append("".join(current))
             current, size = [], 0
         current.append(ch)
@@ -71,11 +77,12 @@ class TelegramChannel:
     → 送回 Telegram。頻道只負責「收訊 → publish_inbound」與「收 outbound → 送出」，
     與 Agent 解耦。
 
-    為什麼要走 bus：python-telegram-bot 預設併發處理更新
-    （`concurrent_updates=256`），過去 handler 直接 `await process_direct()` 時，
-    同一使用者的相鄰訊息會併發進入同一個 session，落盤歷史變成
-    `user, user, assistant, assistant` —— 順序永久損壞，且下次載入時
-    LLM 會收到不合法的對話結構。bus 的單一消費者天然序列化處理。
+    為什麼要走 bus：舊路徑在 handler 裡直接 `await process_direct()`。
+    兩個 handler 同時跑時，同一使用者的相鄰訊息會交錯寫入 session，
+    落盤變成 `user, user, assistant, assistant`。bus 的單一消費者一次只處理
+    一則，歷史維持一問一答。目前 builder 沒有打開 `concurrent_updates`，
+    函式庫預設一次處理一則更新，因此入隊順序就是送達順序。若日後打開並行，
+    入隊順序可能對調；那是後續優化（#32），這裡不另外排序。
     """
 
     def __init__(
@@ -103,6 +110,7 @@ class TelegramChannel:
         )
         self._worker: asyncio.Task | None = None
         self._dispatcher: asyncio.Task | None = None
+        self._background_stopped = False
         i18n_init()
 
     async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -190,11 +198,23 @@ class TelegramChannel:
             task.add_done_callback(_log_task_death)
 
     async def _stop_background(self, application: Application) -> None:
+        """取消兩個背景迴圈。重複呼叫無效果。"""
+        if self._background_stopped:
+            return
+        self._background_stopped = True
         self.agent_loop.stop()
-        tasks = [t for t in (self._worker, self._dispatcher) if t is not None]
+        tasks = [t for t in (self._worker, self._dispatcher) if t is not None and not t.done()]
+        pending = []
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+            # run_polling 若已把 event loop 關掉，任務無法再 await。
+            try:
+                if not task.get_loop().is_closed():
+                    pending.append(task)
+            except RuntimeError:
+                continue
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     def run(self) -> None:
         """啟動 Telegram Bot（Polling 模式）。"""
@@ -214,4 +234,10 @@ class TelegramChannel:
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
 
         logger.info("Telegram Bot started (Polling mode)")
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
+        try:
+            app.run_polling(allowed_updates=Update.ALL_TYPES)
+        finally:
+            # PTB 的 run_polling 在 Ctrl-C／SIGTERM／例外的 finally 會呼叫
+            # post_shutdown。若某條路徑沒叫到，這裡補一次。迴圈已關時只做取消。
+            if not self._background_stopped:
+                asyncio.run(self._stop_background(app))

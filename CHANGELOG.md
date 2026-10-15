@@ -6,6 +6,8 @@
 
 ### 修正
 
+- **Telegram 長訊息的切分改為取較嚴格的長度**：每一段同時受 Python 字元數與 UTF-16 碼元數約束，取較大者，避免 4096 的計算方式與伺服器不一致時整段被拒。`run()` 在 `run_polling()` 返回後若 `post_shutdown` 沒被呼叫，會再執行一次 `_stop_background()`。
+
 - **README 未來擴展有四項沒有 Issue**：記憶自動整合已實作並從清單移除。其餘四項標成未排程構想，並分別開 [#28](https://github.com/chiisen/mini_bot/issues/28)、[#29](https://github.com/chiisen/mini_bot/issues/29)、[#30](https://github.com/chiisen/mini_bot/issues/30)、[#31](https://github.com/chiisen/mini_bot/issues/31)。(Fixes #27)
 
 - **對話不會沉澱進長期記憶**：`process_direct()` 在未整合訊息達到 30 則後，呼叫 LLM 產出 `MEMORY:`／`HISTORY:` 並寫入既有的 `MemoryStore`。只更新 `last_consolidated`，不改訊息列表。`MEMORY.md` 超過 4000 字元時保留尾端。整合失敗只記日誌，當前回覆仍照常送出。(Fixes #6)

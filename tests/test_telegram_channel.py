@@ -265,6 +265,18 @@ class TestSplitForTelegram:
             assert all(
                 len(c.encode("utf-16-le")) // 2 <= REPLY_CHUNK_LIMIT for c in chunks
             )
+            assert all(len(c) <= REPLY_CHUNK_LIMIT for c in chunks)
+
+    def test_width_uses_the_stricter_measure(self):
+        """字元數與 UTF-16 碼元數取較大者，兩種上限都不會被超過。"""
+        from minibot.channels.telegram import _conservative_width
+
+        emoji = "\U0001F534"
+        assert _conservative_width(emoji) == 2
+        assert _conservative_width("啊") == 1
+        chunks = split_for_telegram(emoji * 4096)
+        assert len(chunks) == 2
+        assert all(_conservative_width(c) <= REPLY_CHUNK_LIMIT for c in chunks)
 
 
 class TestBackgroundLifecycle:
@@ -362,6 +374,44 @@ class TestBackgroundLifecycle:
 
         asyncio.run(asyncio.wait_for(scenario(), 3.0))
         assert not [m for m in loguru_messages if "died" in m]
+
+    def test_run_registers_post_shutdown_and_calls_it_if_polling_does_not(self, channel, monkeypatch):
+        """run_polling 返回後，背景迴圈一定被停掉。hook 沒被呼叫時由 run() 補。"""
+        hooks = {}
+
+        class Builder:
+            def token(self, *_a, **_k):
+                return self
+
+            def request(self, *_a, **_k):
+                return self
+
+            def post_init(self, callback):
+                hooks["post_init"] = callback
+                return self
+
+            def post_shutdown(self, callback):
+                hooks["post_shutdown"] = callback
+                return self
+
+            def build(self):
+                app = MagicMock()
+                app.run_polling = MagicMock()
+                return app
+
+        monkeypatch.setattr(
+            "minibot.channels.telegram.Application.builder",
+            lambda: Builder(),
+        )
+        channel.run()
+        assert hooks["post_shutdown"] == channel._stop_background
+        assert hooks["post_init"] == channel._start_background
+        assert channel._background_stopped is True
+
+    def test_stop_background_is_idempotent(self, channel):
+        asyncio.run(channel._stop_background(MagicMock()))
+        asyncio.run(channel._stop_background(MagicMock()))
+        assert channel._background_stopped is True
 
 
 class TestEndToEndThroughBus:
