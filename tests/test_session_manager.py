@@ -308,3 +308,42 @@ class TestListSessions:
 
         updated = [i["updated_at"] for i in items]
         assert updated == sorted(updated, reverse=True)
+
+
+class TestPruneAndDelete:
+    def test_prune_removes_only_old_files_and_keeps_unstamped(self, manager):
+        old = manager.get_or_create("cli:old")
+        old.updated_at = datetime.now() - timedelta(days=8)
+        old.add_message("user", "keep-me-not")
+        # add_message 會把 updated_at 刷成現在，測的是 prune 讀磁碟時間戳。
+        old.updated_at = datetime.now() - timedelta(days=8)
+        manager.save(old)
+
+        recent = manager.get_or_create("cli:new")
+        recent.add_message("user", "stay")
+        manager.save(recent)
+
+        unstamped = manager.sessions_dir / "cli_plain.jsonl"
+        unstamped.write_text(
+            json.dumps({"_type": "metadata", "key": "cli:plain", "created_at": datetime.now().isoformat()}) + "\n",
+            encoding="utf-8",
+        )
+
+        removed = manager.prune(timedelta(days=7))
+        assert removed == ["cli:old"]
+        assert manager.get("cli:old") is None
+        assert manager.get("cli:new").messages[0]["content"] == "stay"
+        assert unstamped.exists()
+
+    def test_delete_missing_session_returns_false(self, manager):
+        assert manager.delete("cli:missing") is False
+
+    def test_get_does_not_clear_expired_session(self, manager):
+        session = manager.get_or_create("cli:direct")
+        session.add_message("user", "old")
+        session.updated_at = datetime.now() - timedelta(days=3)
+        manager.save(session)
+        manager.invalidate("cli:direct")
+
+        loaded = SessionManager(manager.workspace).get("cli:direct")
+        assert loaded.messages[0]["content"] == "old"

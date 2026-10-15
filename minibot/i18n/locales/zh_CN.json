@@ -23,5 +23,11 @@
     "error.llm_request_failed": "抱歉，处理您的请求时发生错误，请稍后再试。",
     "error.empty_reply": "抱歉，我这次没有生成任何回复。请重新发送一次消息。",
     "error.max_iterations_reached": "已达到工具调用次数上限，请换个方式再问一次。",
-    "error.config_load_failed": "错误：配置文件载入失败（{path}）：{error}"
+    "error.config_load_failed": "错误：配置文件载入失败（{path}）：{error}",
+    "cli.sessions.empty": "没有 session。",
+    "cli.sessions.item": "{session_key}  更新于 {updated}",
+    "cli.sessions.show_header": "{session_key}：{count} 条消息，更新于 {updated}",
+    "cli.sessions.not_found": "找不到 session：{session_key}",
+    "cli.sessions.cleared": "已删除 session：{session_key}",
+    "cli.sessions.pruned": "已清理 {count} 个过期 session。"
 }

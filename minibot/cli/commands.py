@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 # Windows 終端機同步設定 UTF-8，避免 emoji 編碼錯誤
@@ -23,6 +24,9 @@ from minibot.i18n import init as i18n_init, t
 from minibot.providers.litellm_provider import LiteLLMProvider
 from minibot.session.manager import SessionManager
 from minibot.utils.helpers import ensure_dir
+
+# 磁碟上的 session 檔不會因為 24 小時逾時而消失；啟動對話前清掉超過此期限的檔案。
+SESSION_FILE_RETENTION = timedelta(days=7)
 
 app = typer.Typer(help="minibot - Personal AI Assistant (powered by mini_bot)")
 console = Console()
@@ -70,6 +74,35 @@ def onboard():
     console.print(t("cli.onboard.edit_config"))
 
 
+def _workspace(config) -> Path:
+    workspace = Path(config.agents.defaults.workspace).expanduser()
+    ensure_dir(workspace)
+    return workspace
+
+
+def _session_manager(config) -> SessionManager:
+    return SessionManager(_workspace(config))
+
+
+def _prune_old_sessions(config) -> None:
+    removed = _session_manager(config).prune(SESSION_FILE_RETENTION)
+    if removed:
+        console.print(t("cli.sessions.pruned", count=len(removed)))
+
+
+def _parse_age(text: str) -> timedelta:
+    raw = text.strip().lower()
+    if len(raw) < 2 or not raw[:-1].isdigit() or raw[-1] not in "dhm":
+        raise typer.BadParameter("期限格式須為數字加 d、h 或 m，例如 7d")
+    amount = int(raw[:-1])
+    unit = raw[-1]
+    if unit == "d":
+        return timedelta(days=amount)
+    if unit == "h":
+        return timedelta(hours=amount)
+    return timedelta(minutes=amount)
+
+
 def _make_provider(config):
     """根據 config 建立 LLM Provider。優先順序：minimax > openrouter > anthropic > openai > deepseek > gemini。"""
     model = config.agents.defaults.model
@@ -108,8 +141,8 @@ def agent(
     """與 mini_bot Agent 互動聊天。"""
     config = _config_or_exit()
     provider = _make_provider(config)
-    workspace = Path(config.agents.defaults.workspace).expanduser()
-    ensure_dir(workspace)
+    workspace = _workspace(config)
+    _prune_old_sessions(config)
 
     bus = MessageBus()
     from minibot.agent.loop import AgentLoop
@@ -242,8 +275,8 @@ def telegram():
         raise typer.Exit(1)
 
     provider = _make_provider(config)
-    workspace = Path(config.agents.defaults.workspace).expanduser()
-    ensure_dir(workspace)
+    workspace = _workspace(config)
+    _prune_old_sessions(config)
 
     console.print(t("cli.telegram.welcome", version=__version__))
     console.print(f"{t('cli.telegram.starting')}\n")
@@ -260,4 +293,63 @@ def telegram():
         memory_window=config.agents.defaults.memory_window,
     )
     channel.run()
+
+
+sessions_app = typer.Typer(help="管理對話 session")
+app.add_typer(sessions_app, name="sessions")
+
+
+@sessions_app.command("list")
+def sessions_list():
+    """列出 workspace 裡的 session。"""
+    manager = _session_manager(_config_or_exit())
+    items = manager.list_sessions()
+    if not items:
+        console.print(t("cli.sessions.empty"))
+        return
+    for item in items:
+        console.print(t(
+            "cli.sessions.item",
+            session_key=item["key"],
+            updated=item.get("updated_at") or "-",
+        ))
+
+
+@sessions_app.command("show")
+def sessions_show(key: str):
+    """顯示一個 session 的訊息摘要。"""
+    session = _session_manager(_config_or_exit()).get(key)
+    if session is None:
+        console.print(t("cli.sessions.not_found", session_key=key))
+        raise typer.Exit(1)
+    console.print(t(
+        "cli.sessions.show_header",
+        session_key=session.key,
+        count=len(session.messages),
+        updated=session.updated_at.isoformat(),
+    ))
+    for message in session.messages[-20:]:
+        content = str(message.get("content", "")).replace("\n", " ")
+        if len(content) > 120:
+            content = content[:117] + "..."
+        console.print(f"  {message.get('role', '?')}: {content}")
+
+
+@sessions_app.command("clear")
+def sessions_clear(key: str):
+    """刪除一個 session 檔。"""
+    deleted = _session_manager(_config_or_exit()).delete(key)
+    if not deleted:
+        console.print(t("cli.sessions.not_found", session_key=key))
+        raise typer.Exit(1)
+    console.print(t("cli.sessions.cleared", session_key=key))
+
+
+@sessions_app.command("prune")
+def sessions_prune(
+    older_than: str = typer.Option("7d", "--older-than", help="保留期限，例如 7d、24h、30m"),
+):
+    """刪除超過保留期限的 session 檔。"""
+    removed = _session_manager(_config_or_exit()).prune(_parse_age(older_than))
+    console.print(t("cli.sessions.pruned", count=len(removed)))
 

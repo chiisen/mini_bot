@@ -313,7 +313,7 @@ minibot telegram
 | **🔁 Agent Loop** | LLM ↔ Tool 迭代迴圈（最多 20 輪） |
 | **📂 檔案工具** | `read_file`、`write_file`、`list_dir` |
 | **💻 Shell 工具** | `shell` — 讓 Agent 能執行系統指令 |
-| **💾 Session 持久化** | JSONL 格式，自動載入歷史對話 |
+| **💾 Session 持久化** | JSONL 格式，自動載入歷史對話。`minibot sessions` 可列出、查看、刪除；`agent`／`telegram` 啟動時會清掉超過 7 天的檔案 |
 | **🧠 記憶系統** | `MEMORY.md` 長期記憶 + `HISTORY.md` 歷史日誌 |
 | **⚙️ 設定系統** | Pydantic schema，`~/.minibot/config.json`（repo 外，安全） |
 | **📡 狀態監控** | `minibot status` 顯示設定、Provider、Telegram 狀態 |

@@ -6,6 +6,8 @@
 
 ### 修正
 
+- **Session 檔只會累積、沒有管理入口**：新增 `minibot sessions list|show|clear|prune`。`prune` 依 `updated_at` 刪除超過期限的檔案，缺時間戳的舊檔保留。`agent` 與 `telegram` 啟動時以 7 天為預設保留期限自動清理。既有未過期檔案不會被改寫。(Fixes #5)
+
 - **CLI 成功路徑沒有測試**：`status`／`config-show` 在 Telegram 已設定時會遮罩 token；`agent -m` 與互動 REPL、`telegram` 啟動改以假 provider／假 channel 驗證，並用子行程覆蓋匯入期設定損壞的 fallback。(Fixes #24)
 
 - **中文注入的已知誤傷沒有棘輪**：#21 裁定不修的三句正常中文，之後若誤傷範圍擴大不會有測試失敗。新增 xfail（目標行為）與現行輸出快照（含全形標點被轉半形）。快照改變代表範圍變了，必須一併檢視能否拿掉 xfail。(Fixes #25)

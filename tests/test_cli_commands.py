@@ -287,6 +287,67 @@ class TestTelegramCommand:
         assert created["workspace"] == isolated_home / "ws"
 
 
+class TestSessionsCommand:
+    def _write_session(self, home, key, updated_at, content="hi"):
+        from datetime import datetime
+        from minibot.session.manager import SessionManager
+        from minibot.session.manager import Session
+
+        workspace = home / "ws"
+        manager = SessionManager(workspace)
+        session = Session(key=key, updated_at=updated_at, created_at=updated_at)
+        session.add_message("user", content)
+        session.updated_at = updated_at
+        manager.save(session)
+        return workspace
+
+    def test_list_show_and_clear(self, isolated_home):
+        from datetime import datetime
+
+        self._write_session(isolated_home, "cli:direct", datetime.now(), content="記得這句")
+        write_config(isolated_home, {"agents": {"defaults": {"workspace": str(isolated_home / "ws")}}})
+
+        listed = runner.invoke(cmds.app, ["sessions", "list"])
+        assert listed.exit_code == 0
+        assert "cli:direct" in listed.output
+
+        shown = runner.invoke(cmds.app, ["sessions", "show", "cli:direct"])
+        assert shown.exit_code == 0
+        assert "記得這句" in shown.output
+
+        cleared = runner.invoke(cmds.app, ["sessions", "clear", "cli:direct"])
+        assert cleared.exit_code == 0
+        again = runner.invoke(cmds.app, ["sessions", "show", "cli:direct"])
+        assert again.exit_code == 1
+
+    def test_prune_keeps_recent_sessions(self, isolated_home):
+        from datetime import datetime, timedelta
+
+        self._write_session(isolated_home, "cli:old", datetime.now() - timedelta(days=9))
+        self._write_session(isolated_home, "cli:new", datetime.now(), content="留下")
+        write_config(isolated_home, {"agents": {"defaults": {"workspace": str(isolated_home / "ws")}}})
+
+        result = runner.invoke(cmds.app, ["sessions", "prune", "--older-than", "7d"])
+        assert result.exit_code == 0
+        assert "1" in result.output
+
+        shown = runner.invoke(cmds.app, ["sessions", "show", "cli:new"])
+        assert "留下" in shown.output
+        missing = runner.invoke(cmds.app, ["sessions", "show", "cli:old"])
+        assert missing.exit_code == 1
+
+    def test_agent_startup_prunes_expired_files(self, isolated_home, monkeypatch):
+        from datetime import datetime, timedelta
+
+        self._write_session(isolated_home, "cli:old", datetime.now() - timedelta(days=9), content="過期")
+        write_config(isolated_home, {"agents": {"defaults": {"workspace": str(isolated_home / "ws")}}})
+        monkeypatch.setattr(cmds, "_make_provider", lambda config: _FakeProvider())
+
+        result = runner.invoke(cmds.app, ["agent", "-m", "hi", "--no-markdown"])
+        assert result.exit_code == 0
+        assert not (isolated_home / "ws" / "sessions" / "cli_old.jsonl").exists()
+
+
 class TestStartupLocaleFallback:
     def test_corrupt_config_at_import_does_not_force_english(self, tmp_path):
         """34–37 行只在匯入期設定就壞掉時執行，必須用子行程重現。"""

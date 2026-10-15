@@ -193,6 +193,37 @@ class SessionManager:
         """從記憶體快取移除 session。"""
         self._cache.pop(key, None)
 
+    def get(self, key: str) -> Session | None:
+        """讀取既有 session，不建立、也不因逾時清空。"""
+        if key in self._cache:
+            return self._cache[key]
+        return self._load(key)
+
+    def delete(self, key: str) -> bool:
+        """刪除 session 檔與快取。檔案不存在時回傳 False。"""
+        self._cache.pop(key, None)
+        path = self._get_session_path(key)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    def prune(self, older_than: timedelta) -> list[str]:
+        """刪除 updated_at 早於保留期限的 session。缺少時間戳的檔案保留。"""
+        cutoff = datetime.now() - older_than
+        removed: list[str] = []
+        for item in self.list_sessions():
+            stamp = item.get("updated_at")
+            if not stamp:
+                continue
+            try:
+                updated = datetime.fromisoformat(stamp)
+            except ValueError:
+                continue
+            if updated < cutoff and self.delete(item["key"]):
+                removed.append(item["key"])
+        return removed
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """
         列出所有 sessions。
