@@ -22,5 +22,6 @@
     "error.tool_execution_failed": "抱歉，執行工具時發生錯誤，請稍後再試。",
     "error.llm_request_failed": "抱歉，處理您的請求時發生錯誤，請稍後再試。",
     "error.empty_reply": "抱歉，我這次沒有產生任何回覆。請重新傳送一次訊息。",
+    "error.max_iterations_reached": "已達工具呼叫次數上限，請換個方式再問一次。",
     "error.config_load_failed": "錯誤：設定檔載入失敗（{path}）：{error}"
 }

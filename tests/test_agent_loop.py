@@ -223,7 +223,8 @@ class TestMaxIterations:
         result = asyncio.run(
             make_loop(provider, workspace, max_iterations=3).process_direct("loop")
         )
-        assert result == "Reached max iterations."
+        assert result == t("error.max_iterations_reached")
+        assert result != "Reached max iterations."
         assert provider.calls == 3
 
 

@@ -22,5 +22,6 @@
     "error.tool_execution_failed": "Sorry, an error occurred while executing the tool. Please try again later.",
     "error.llm_request_failed": "Sorry, an error occurred while processing your request. Please try again later.",
     "error.empty_reply": "Sorry, I didn't produce a reply this time. Please send your message again.",
+    "error.max_iterations_reached": "Reached the tool-call limit. Please try again with a simpler request.",
     "error.config_load_failed": "Error: Failed to load config ({path}): {error}"
 }

@@ -113,7 +113,7 @@ class AgentLoop:
                 if on_progress:
                     await on_progress(f"🔧 {tc.name}")
 
-        return "Reached max iterations.", tools_used
+        return t("error.max_iterations_reached"), tools_used
 
     async def process_direct(
         self,

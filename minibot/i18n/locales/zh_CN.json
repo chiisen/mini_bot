@@ -22,5 +22,6 @@
     "error.tool_execution_failed": "抱歉，执行工具时发生错误，请稍后再试。",
     "error.llm_request_failed": "抱歉，处理您的请求时发生错误，请稍后再试。",
     "error.empty_reply": "抱歉，我这次没有生成任何回复。请重新发送一次消息。",
+    "error.max_iterations_reached": "已达到工具调用次数上限，请换个方式再问一次。",
     "error.config_load_failed": "错误：配置文件载入失败（{path}）：{error}"
 }
